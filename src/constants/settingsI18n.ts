@@ -43,6 +43,10 @@ export interface SettingsCopy {
   modeOutput: string;
   modeInput: string;
   modeEnglish: string;
+  popoverSectionTitle: string;
+  convertSectionTitle: string;
+  shortcutHint: string;
+  swapLanguages: string;
 }
 
 const EN_COPY: SettingsCopy = {
@@ -89,6 +93,11 @@ const EN_COPY: SettingsCopy = {
   modeOutput: "Output",
   modeInput: "Input",
   modeEnglish: "English",
+  popoverSectionTitle: "Popover Settings",
+  convertSectionTitle: "Convert Text Settings",
+  shortcutHint:
+    "Select this field then press a key combination, for example: Shift, Alt+1, Ctrl+Shift+L.",
+  swapLanguages: "Swap input and output language",
 };
 
 const VI_COPY: SettingsCopy = {
@@ -135,6 +144,11 @@ const VI_COPY: SettingsCopy = {
   modeOutput: "Theo đầu ra",
   modeInput: "Theo đầu vào",
   modeEnglish: "Tiếng Anh",
+  popoverSectionTitle: "Cài đặt Popover",
+  convertSectionTitle: "Cài đặt Convert Text",
+  shortcutHint:
+    "Chọn ô phím tắt rồi nhấn trực tiếp phím hoặc tổ hợp phím, ví dụ: Shift, Alt+1, Ctrl+Shift+L.",
+  swapLanguages: "Đổi qua lại ngôn ngữ đầu vào và đầu ra",
 };
 
 export function getSettingsCopy(

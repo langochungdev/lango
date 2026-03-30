@@ -58,6 +58,7 @@ function changedSettingKeys(previous: AppSettings, next: AppSettings): string[] 
 function SettingsWindow() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [status, setStatus] = useState<SettingsStatus>('ready')
+  const [loadingSettings, setLoadingSettings] = useState(true)
   const settingsRef = useRef<AppSettings>(DEFAULT_SETTINGS)
   const saveSequenceRef = useRef(0)
   const copy = getSettingsCopy(settings.target_language)
@@ -85,6 +86,10 @@ function SettingsWindow() {
           setSettings(DEFAULT_SETTINGS)
           setStatus('usingDefaults')
           appendDebugLog('settings', 'Load settings failed, using defaults')
+        }
+      } finally {
+        if (mounted) {
+          setLoadingSettings(false)
         }
       }
     }
@@ -177,6 +182,14 @@ function SettingsWindow() {
   return (
     <main className="apl-settings-shell">
       <p className="apl-meta">{statusMessage}</p>
+
+      {loadingSettings && (
+        <section className="apl-settings-boot" role="status" aria-live="polite">
+          <div className="apl-settings-boot-card" />
+          <div className="apl-settings-boot-card" />
+          <div className="apl-settings-boot-card" />
+        </section>
+      )}
 
       <SettingsPanel
         open

@@ -91,7 +91,7 @@ impl Default for AppConfig {
             enable_translate: true,
             enable_audio: true,
             auto_play_audio_mode: "word".to_owned(),
-            popover_trigger_mode: "shortcut".to_owned(),
+            popover_trigger_mode: "auto".to_owned(),
             popover_shortcut: "Ctrl+Shift+D".to_owned(),
             source_language: "en".to_owned(),
             target_language: "vi".to_owned(),
@@ -99,7 +99,7 @@ impl Default for AppConfig {
             quick_translate_target_language: "en".to_owned(),
             max_definitions: 3,
             show_example: true,
-            popover_open_panel_mode: "details".to_owned(),
+            popover_open_panel_mode: "none".to_owned(),
             popover_definition_language_mode: "output".to_owned(),
             hotkey_translate_shortcut: "Shift".to_owned(),
         }
@@ -109,15 +109,13 @@ impl Default for AppConfig {
 impl AppConfig {
     pub fn sanitize(self) -> Self {
         let mut next = self;
-        next.enable_lookup = true;
-        next.enable_translate = true;
-        next.enable_audio = true;
-        next.show_example = true;
         next.max_definitions = next.max_definitions.clamp(1, 10);
         if next.auto_play_audio_mode.is_empty() {
             next.auto_play_audio_mode = "word".to_owned();
         }
-        next.popover_trigger_mode = "shortcut".to_owned();
+        if next.popover_trigger_mode != "shortcut" {
+            next.popover_trigger_mode = "auto".to_owned();
+        }
         next.popover_shortcut = sanitize_shortcut(&next.popover_shortcut, "Ctrl+Shift+D", false);
         if next.source_language.is_empty() {
             next.source_language = "en".to_owned();
@@ -132,7 +130,7 @@ impl AppConfig {
             next.quick_translate_target_language = "en".to_owned();
         }
         if next.popover_open_panel_mode.is_empty() {
-            next.popover_open_panel_mode = "details".to_owned();
+            next.popover_open_panel_mode = "none".to_owned();
         }
         if next.popover_definition_language_mode.is_empty() {
             next.popover_definition_language_mode = "output".to_owned();

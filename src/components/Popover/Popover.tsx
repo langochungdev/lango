@@ -14,15 +14,6 @@ interface PopoverProps {
   onOpenSettings?: () => void
 }
 
-function firstLookupSummary(dictionary: DictionaryResult): string {
-  const firstMeaning = dictionary.meanings[0]
-  if (!firstMeaning) {
-    return ''
-  }
-  const firstDefinition = firstMeaning.definitions[0]
-  return String(firstDefinition || '').trim()
-}
-
 function normalizeText(value: string): string {
   return value.replace(/\s+/g, ' ').trim()
 }
@@ -45,6 +36,13 @@ function sanitizeMarkup(value: string): string {
   return element.value
 }
 
+function lookupPrimary(dictionary: DictionaryResult) {
+  const firstMeaning = dictionary.meanings[0]
+  const partOfSpeech = normalizeText(sanitizeMarkup(firstMeaning?.part_of_speech || ''))
+  const firstDefinition = normalizeText(sanitizeMarkup(firstMeaning?.definitions?.[0] || ''))
+  return { partOfSpeech, firstDefinition }
+}
+
 function imageCandidates(query: string): string[] {
   const safeQuery = encodeURIComponent(query.trim())
   if (!safeQuery) {
@@ -52,6 +50,52 @@ function imageCandidates(query: string): string[] {
   }
 
   return [0, 1, 2, 3].map((index) => `https://source.unsplash.com/600x420/?${safeQuery}&sig=${index}`)
+}
+
+function LoadingDots({ label }: { label: string }) {
+  return (
+    <div className="apl-loading" role="status" aria-live="polite" aria-label={label}>
+      <span className="apl-loading-dots" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </span>
+    </div>
+  )
+}
+
+function AudioIcon() {
+  return (
+    <svg className="apl-audio-icon" viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+      <g fill="none" fillRule="evenodd" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M6.5 8.5v4" />
+        <path d="M8.5 6.5v9" />
+        <path d="M10.5 9.5v2" />
+        <path d="M12.5 7.5v6.814" />
+        <path d="M14.5 4.5v12" />
+      </g>
+    </svg>
+  )
+}
+
+function ImageIcon() {
+  return (
+    <svg className="apl-image-icon" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+      <g fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5">
+        <rect x="2.8" y="4" width="14.4" height="12" rx="2" />
+        <circle cx="7.2" cy="8" r="1.3" />
+        <path d="M4.8 14l3.6-3.8 2.8 2.8 2.4-2.3 2.4 3.3" />
+      </g>
+    </svg>
+  )
+}
+
+function SettingsIcon() {
+  return (
+    <svg className="apl-settings-icon" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+      <path d="M8.2 2.6h3.6l.5 2.1a5.6 5.6 0 0 1 1.2.7l2-.8 1.8 3.1-1.5 1.5c.1.4.1.8.1 1.2s0 .8-.1 1.2l1.5 1.5-1.8 3.1-2-.8a5.6 5.6 0 0 1-1.2.7l-.5 2.1H8.2l-.5-2.1a5.6 5.6 0 0 1-1.2-.7l-2 .8-1.8-3.1L4.2 12a6 6 0 0 1-.1-1.2c0-.4 0-.8.1-1.2L2.7 8.1l1.8-3.1 2 .8a5.6 5.6 0 0 1 1.2-.7zm1.8 5a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4z" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
 }
 
 export function Popover({
@@ -106,9 +150,7 @@ export function Popover({
     try {
       const audio = new Audio(dictionary.audio_url)
       audioRef.current = audio
-      audio.onended = () => {
-        setAudioPlaying(false)
-      }
+      audio.onended = () => setAudioPlaying(false)
       audio.onerror = () => {
         setAudioPlaying(false)
         setAudioError('Audio playback failed')
@@ -121,16 +163,12 @@ export function Popover({
     }
   }, [audioPlaying, dictionary?.audio_url, stopAudio])
 
-  const togglePanel = useCallback((panel: PopoverOpenPanelMode) => {
-    setActivePanel((current) => (current === panel ? 'none' : panel))
-  }, [])
-
   if (state === 'idle') {
     return null
   }
 
   const cleanSelection = normalizeText(selection)
-  const lookupSummary = dictionary ? normalizeText(sanitizeMarkup(firstLookupSummary(dictionary))) : ''
+  const selectedText = cleanSelection || 'Selection'
   const translationLines = translation
     ? sanitizeMarkup(translation.result)
         .split(/\r?\n+/)
@@ -138,127 +176,112 @@ export function Popover({
         .filter(Boolean)
     : []
 
-  const showDetailsPanel = activePanel === 'details'
+  const lookupData = dictionary
+    ? {
+        word: normalizeText(sanitizeMarkup(dictionary.word || selectedText)),
+        phonetic: normalizeText(sanitizeMarkup(dictionary.phonetic || '')),
+        ...lookupPrimary(dictionary)
+      }
+    : null
+
+  const definitionText = lookupData?.firstDefinition || ''
+  const showDetailsPanel = state === 'lookup' && Boolean(dictionary) && activePanel === 'details'
   const showImagePanel = activePanel === 'images'
-  const hasDetailsPanelContent =
-    (state === 'lookup' && Boolean(dictionary)) ||
-    (state === 'translate' && Boolean(translation))
-  const selectedText = cleanSelection || 'Selection'
+  const showSidePanel = showDetailsPanel || showImagePanel
   const images = imageCandidates(selectedText)
 
   return (
-    <section className="apl-popover" data-testid="popover" role="dialog" aria-modal="true" aria-labelledby="apl-popover-title">
-      <header className="apl-popover-header">
-        <h2 id="apl-popover-title">{selectedText}</h2>
-        <div className="apl-popover-tools" role="toolbar" aria-label="Popover tools">
-          <button
-            type="button"
-            className="apl-popover-tool-btn"
-            data-active={showDetailsPanel}
-            onClick={() => togglePanel('details')}
-          >
-            Details
-          </button>
-          <button
-            type="button"
-            className="apl-popover-tool-btn"
-            data-active={showImagePanel}
-            onClick={() => togglePanel('images')}
-          >
-            Images
-          </button>
-          <button
-            type="button"
-            className="apl-popover-tool-btn"
-            onClick={() => void playAudio()}
-            disabled={!canPlayAudio}
-          >
-            {audioPlaying ? 'Stop Audio' : 'Audio'}
-          </button>
-          <button
-            type="button"
-            className="apl-popover-tool-btn apl-popover-tool-btn--settings"
-            onClick={onOpenSettings}
-          >
-            Settings
-          </button>
-        </div>
-      </header>
+    <section className={`apl-popover ${showSidePanel ? 'apl-popover--split' : ''}`} data-testid="popover" role="dialog" aria-modal="true" aria-label="Dictover popover">
+      <div className="apl-popover-main">
+        {state === 'loading' && (
+          <div className="apl-body apl-body--loading-only">
+            <LoadingDots label="Loading" />
+          </div>
+        )}
 
-      {state === 'loading' && (
-        <p className="apl-status" role="status" aria-live="polite">
-          Loading...
-        </p>
-      )}
+        {state === 'lookup' && dictionary && lookupData && (
+          <div className="apl-body apl-lookup-compact">
+            <div className="apl-lookup-headerline">
+              <div className="apl-lookup-headertext">
+                <h2 className="apl-lookup-summary">{definitionText || lookupData.word}</h2>
+                {lookupData.phonetic && <span className="apl-lookup-phonetic-inline">/{lookupData.phonetic}/</span>}
+                {lookupData.partOfSpeech && <span className="apl-pos-inline">{lookupData.partOfSpeech}</span>}
+              </div>
 
-      {state === 'lookup' && dictionary && (
-        <div className="apl-content apl-content--lookup">
-          <p className="apl-lookup-word">{normalizeText(sanitizeMarkup(dictionary.word || cleanSelection))}</p>
-          {dictionary.phonetic && <p className="apl-phonetic">/{normalizeText(sanitizeMarkup(dictionary.phonetic))}/</p>}
-          {lookupSummary && (
-            <button
-              type="button"
-              className="apl-summary-trigger"
-              onClick={() => setActivePanel('details')}
-            >
-              {lookupSummary}
-            </button>
-          )}
-          <p className="apl-meta">
-            Provider: {dictionary.provider}
-            {dictionary.fallback_used ? ' (fallback)' : ''}
-          </p>
-        </div>
-      )}
-
-      {state === 'translate' && translation && (
-        <div className="apl-content apl-content--translate">
-          {translationLines.length > 0 ? (
-            translationLines.map((line, index) => (
-              <p key={`${index}-${line}`} className="apl-translation">
-                {line}
-              </p>
-            ))
-          ) : (
-            <p className="apl-translation">{normalizeText(sanitizeMarkup(translation.result))}</p>
-          )}
-          <p className="apl-meta">Engine: {translation.engine}</p>
-        </div>
-      )}
-
-      {audioError && <p className="apl-error">{audioError}</p>}
-
-      {state === 'error' && <p className="apl-error">{error ?? 'Unknown error'}</p>}
-
-      {showDetailsPanel && hasDetailsPanelContent && (
-        <aside className="apl-subpanel" data-panel-mode="details">
-          {state === 'lookup' && dictionary && (
-            <div className="apl-subpanel-body">
-              {dictionary.meanings.map((meaning, meaningIndex) => (
-                <article
-                  key={`${meaning.part_of_speech}-${meaningIndex}`}
-                  className="apl-meaning"
+              <div className="apl-inline-actions">
+                <button type="button" className="apl-button apl-audio apl-audio-mini" aria-label="Play audio" onClick={() => void playAudio()} disabled={!canPlayAudio}>
+                  <AudioIcon />
+                </button>
+                <button
+                  type="button"
+                  className={`apl-button apl-image-toggle apl-audio-mini ${showImagePanel ? 'apl-image-toggle--active' : ''}`}
+                  aria-label="Open image panel"
+                  aria-pressed={showImagePanel}
+                  onClick={() => setActivePanel((current) => (current === 'images' ? 'none' : 'images'))}
                 >
-                  <h3>{normalizeText(sanitizeMarkup(meaning.part_of_speech || 'Meaning'))}</h3>
-                  <ul>
-                    {meaning.definitions.map((definition, definitionIndex) => (
-                      <li key={`${meaningIndex}-${definitionIndex}-${definition}`}>
-                        {normalizeText(sanitizeMarkup(definition))}
-                      </li>
-                    ))}
-                  </ul>
-                  {meaning.example && <p className="apl-example">Example: {normalizeText(sanitizeMarkup(meaning.example))}</p>}
-                </article>
-              ))}
+                  <ImageIcon />
+                </button>
+                <button type="button" className="apl-button apl-popover-settings apl-audio-mini" aria-label="Open settings" onClick={onOpenSettings} disabled={!onOpenSettings}>
+                  <SettingsIcon />
+                </button>
+              </div>
             </div>
-          )}
 
-          {state === 'translate' && translation && (
-            <div className="apl-subpanel-body">
-              <p className="apl-meta">Mode: {translation.mode}</p>
-              <p className="apl-meta">Engine: {translation.engine}</p>
+            {definitionText && (
+              <button
+                type="button"
+                className="apl-lookup-definition-toggle"
+                aria-expanded={showDetailsPanel}
+                onClick={() => setActivePanel((current) => (current === 'details' ? 'none' : 'details'))}
+              >
+                <span className="apl-definition-toggle-icon">{showDetailsPanel ? 'v' : '>'}</span>
+                <span className="apl-lookup-definition">{definitionText}</span>
+              </button>
+            )}
+          </div>
+        )}
+
+        {state === 'translate' && translation && (
+          <div className="apl-body apl-translate-compact">
+            <div className="apl-translate-vi apl-translate-vi--primary">
+              {translationLines.length > 0 ? translationLines.join(' ') : normalizeText(sanitizeMarkup(translation.result))}
             </div>
-          )}
+            <div className="apl-inline-actions apl-translate-inline-actions">
+              <button
+                type="button"
+                className={`apl-button apl-image-toggle ${showImagePanel ? 'apl-image-toggle--active' : ''}`}
+                aria-label="Open image panel"
+                aria-pressed={showImagePanel}
+                onClick={() => setActivePanel((current) => (current === 'images' ? 'none' : 'images'))}
+              >
+                <ImageIcon />
+              </button>
+              <button type="button" className="apl-button apl-popover-settings" aria-label="Open settings" onClick={onOpenSettings} disabled={!onOpenSettings}>
+                <SettingsIcon />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {audioError && <p className="apl-error">{audioError}</p>}
+        {state === 'error' && <p className="apl-error">{error ?? 'Unknown error'}</p>}
+      </div>
+
+      {showDetailsPanel && dictionary && (
+        <aside className="apl-subpanel" data-panel-mode="details">
+          <div className="apl-subpanel-body">
+            {dictionary.meanings.map((meaning, meaningIndex) => (
+              <article key={`${meaning.part_of_speech}-${meaningIndex}`} className="apl-meaning">
+                <h3 className="apl-pos">{normalizeText(sanitizeMarkup(meaning.part_of_speech || 'Meaning'))}</h3>
+                {meaning.definitions.map((definition, definitionIndex) => (
+                  <p key={`${meaningIndex}-${definitionIndex}-${definition}`} className="apl-def">
+                    {normalizeText(sanitizeMarkup(definition))}
+                  </p>
+                ))}
+                {meaning.example && <p className="apl-example">Example: {normalizeText(sanitizeMarkup(meaning.example))}</p>}
+              </article>
+            ))}
+          </div>
         </aside>
       )}
 

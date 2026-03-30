@@ -104,7 +104,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   enable_translate: true,
   enable_audio: true,
   auto_play_audio_mode: "word",
-  popover_trigger_mode: "shortcut",
+  popover_trigger_mode: "auto",
   popover_shortcut: "Ctrl+Shift+D",
   source_language: "en",
   target_language: "vi",
@@ -112,7 +112,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   quick_translate_target_language: "en",
   max_definitions: 3,
   show_example: true,
-  popover_open_panel_mode: "details",
+  popover_open_panel_mode: "none",
   popover_definition_language_mode: "output",
   hotkey_translate_shortcut: "Shift",
 };
@@ -135,6 +135,8 @@ export function sanitizeSettings(partial: Partial<AppSettings>): AppSettings {
   );
   const audioMode =
     merged.auto_play_audio_mode || DEFAULT_SETTINGS.auto_play_audio_mode;
+  const triggerMode =
+    merged.popover_trigger_mode === "shortcut" ? "shortcut" : "auto";
   const panelMode =
     merged.popover_open_panel_mode || DEFAULT_SETTINGS.popover_open_panel_mode;
   const languageMode =
@@ -153,12 +155,12 @@ export function sanitizeSettings(partial: Partial<AppSettings>): AppSettings {
 
   return {
     ...merged,
-    enable_lookup: true,
-    enable_translate: true,
-    enable_audio: true,
-    show_example: true,
+    enable_lookup: merged.enable_lookup !== false,
+    enable_translate: merged.enable_translate !== false,
+    enable_audio: merged.enable_audio !== false,
+    show_example: merged.show_example !== false,
     auto_play_audio_mode: audioMode,
-    popover_trigger_mode: "shortcut",
+    popover_trigger_mode: triggerMode,
     popover_shortcut: popoverShortcut,
     source_language: sourceLanguage,
     target_language: targetLanguage,
