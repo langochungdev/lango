@@ -154,96 +154,36 @@ button {
     position: fixed;
     left: 12px;
     top: 12px;
-    width: min(560px, calc(100vw - 24px));
-    max-height: min(55vh, 420px);
-    overflow: auto;
+    z-index: 9999;
+    display: inline-block;
+    width: fit-content;
+    max-width: min(560px, calc(100vw - 24px));
     border: 1px solid #d7dde9;
     border-radius: 12px;
     background: #ffffff;
     color: #121826;
     box-shadow: 0 14px 36px rgba(18, 24, 38, 0.16);
-    z-index: 9999;
     padding: 0.72rem;
-    display: grid;
-    gap: 0.65rem;
 }
 
 .apl-popover-shell {
     width: 100vw;
     padding: 0.4rem;
+    overflow-x: hidden;
 }
 
 .apl-hotkey-indicator-shell {
     width: 100vw;
     min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0.25rem;
-}
-
-.apl-hotkey-indicator {
-    min-width: 148px;
-    border-radius: 999px;
-    border: 1px solid rgba(18, 24, 38, 0.16);
-    background: rgba(255, 255, 255, 0.94);
-    box-shadow: 0 12px 24px rgba(18, 24, 38, 0.2);
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.4rem 0.7rem;
-}
-
-.apl-hotkey-indicator-dot {
-    width: 12px;
-    height: 12px;
-    border-radius: 999px;
-    border: 2px solid rgba(29, 111, 163, 0.22);
-    border-top-color: #1d6fa3;
-    animation: apl-hotkey-spin 0.7s linear infinite;
-}
-
-.apl-hotkey-indicator-text {
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: #1f2f49;
-    letter-spacing: 0.01em;
-}
-
-@keyframes apl-hotkey-spin {
-    from {
-        transform: rotate(0deg);
-    }
-
-    to {
-        transform: rotate(360deg);
-    }
+    cursor: wait;
+    background: transparent;
 }
 
 .apl-popover-shell .apl-popover {
     position: static;
     inset: auto;
-    width: 100%;
-    max-height: min(72vh, 560px);
-    overflow: auto;
-    margin: 0;
-}
-
-.apl-popover {
-    width: min(560px, calc(100vw - 24px));
-    padding: 0;
-    display: block;
-}
-
-.apl-popover--split {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 0.94fr);
-    gap: 8px;
-    align-items: stretch;
-}
-
-.apl-popover-main {
-    min-width: 0;
+    width: fit-content;
+    max-width: min(560px, calc(100vw - 24px));
 }
 
 .apl-body {
@@ -252,7 +192,9 @@ button {
 }
 
 .apl-body--loading-only {
-    min-height: 30px;
+    min-height: 20px;
+    width: fit-content;
+    padding: 4px 8px;
 }
 
 .apl-loading {
@@ -394,6 +336,7 @@ button {
     display: block;
     position: relative;
     width: 100%;
+    padding-left: 16px;
     text-align: left;
     cursor: pointer;
     color: #24324a;
@@ -402,15 +345,22 @@ button {
 .apl-definition-toggle-icon {
     color: #1e3a8a;
     font-size: 0.95em;
-    line-height: 1.35;
+    line-height: 1;
     position: absolute;
     left: 0;
-    top: 0.05em;
+    top: 0.15em;
+    width: 12px;
+    text-align: center;
+    transform-origin: center;
+}
+
+.apl-definition-toggle-icon.is-open {
+    transform: rotate(90deg);
 }
 
 .apl-lookup-definition {
     display: block;
-    text-indent: 16px;
+    text-indent: 0;
     overflow-wrap: anywhere;
 }
 
@@ -434,18 +384,25 @@ button {
 }
 
 .apl-subpanel {
+    width: min(440px, calc(100vw - 24px));
     border: 1px solid #d7dde9;
     border-radius: 10px;
     color: #24324a;
     background: #ffffff;
-    max-height: min(55vh, 420px);
     overflow: auto;
+    box-shadow: 0 16px 34px rgba(18, 24, 38, 0.18);
+}
+
+.apl-subpanel[data-panel-mode='images'] {
+    width: min(520px, calc(100vw - 24px));
+    min-height: 280px;
 }
 
 .apl-subpanel-body {
-    padding: 6px;
+    padding: 4px 5px;
     display: grid;
     gap: 6px;
+    text-align: left;
 }
 
 .apl-pos {
@@ -529,20 +486,6 @@ button {
         color: #0f4f77;
         text-decoration: underline;
     }
-}
-
-.apl-subpanel {
-    border: 1px solid #d7dde9;
-    border-radius: 10px;
-    color: #24324a;
-    background: #ffffff;
-    z-index: 10001;
-}
-
-.apl-subpanel-body {
-    padding: 0.52rem 0.56rem;
-    display: grid;
-    gap: 0.56rem;
 }
 
 .apl-image-grid {
@@ -936,8 +879,8 @@ button {
         top: 8px;
     }
 
-    .apl-popover--split {
-        grid-template-columns: 1fr;
+    .apl-subpanel {
+        width: min(100vw - 24px, 440px);
     }
 
     .apl-settings-language-row {

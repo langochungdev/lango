@@ -1,7 +1,7 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, State};
 
 use crate::config::{self, AppConfig};
 use crate::hotkey;
@@ -155,6 +155,7 @@ pub async fn save_config(
     }
     config::save_config_to_disk(&app, &clean)?;
     hotkey::register_hotkeys(&app, &clean)?;
+    let _ = app.emit("settings-updated", clean.clone());
     Ok(clean)
 }
 
@@ -187,8 +188,9 @@ pub async fn emit_selection_changed(
     app: AppHandle,
     text: String,
     trigger: String,
+    anchor: Option<selection::SelectionAnchor>,
 ) -> Result<(), String> {
-    selection::emit_selection_changed(&app, text, trigger)
+    selection::emit_selection_changed(&app, text, trigger, anchor)
 }
 
 #[tauri::command]
@@ -224,5 +226,16 @@ pub fn show_debug_window(app: AppHandle) -> Result<(), String> {
     debug
         .set_focus()
         .map_err(|err| format!("focus debug window failed: {err}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn resize_popover(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
+    let popover = app
+        .get_webview_window("popover")
+        .ok_or_else(|| "popover window not found".to_owned())?;
+    popover
+        .set_size(LogicalSize::new(width, height))
+        .map_err(|err| format!("resize popover failed: {err}"))?;
     Ok(())
 }

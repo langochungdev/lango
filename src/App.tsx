@@ -8,12 +8,16 @@ import { getSettingsCopy } from '@/constants/settingsI18n'
 import { usePopover } from '@/hooks/usePopover'
 import { loadSettings, saveSettings } from '@/services/config'
 import { appendDebugLog } from '@/services/debugLog'
-import { DEFAULT_SETTINGS, type AppSettings } from '@/types/settings'
+import type { SelectionAnchor } from '@/types/selectionAnchor'
+import { DEFAULT_SETTINGS, sanitizeSettings, type AppSettings } from '@/types/settings'
 
 interface SelectionEventPayload {
   text: string
   trigger: 'auto' | 'shortcut'
+  anchor?: SelectionAnchor | null
 }
+
+type SettingsUpdatedPayload = Partial<AppSettings>
 
 interface HotkeyTranslationPayload {
   original: string
@@ -98,6 +102,7 @@ function SettingsWindow() {
 
   useEffect(() => {
     let cleanupHotkey: (() => void) | null = null
+    let cleanupSettingsUpdated: (() => void) | null = null
     const setupEvents = async () => {
       try {
         const unlistenHotkey = await listen<HotkeyTranslationPayload>('hotkey-translated', (event) => {
@@ -115,10 +120,20 @@ function SettingsWindow() {
       } catch {
         cleanupHotkey = null
       }
+
+      try {
+        const unlistenSettingsUpdated = await listen<SettingsUpdatedPayload>('settings-updated', (event) => {
+          setSettings((previous) => sanitizeSettings({ ...previous, ...event.payload }))
+        })
+        cleanupSettingsUpdated = unlistenSettingsUpdated
+      } catch {
+        cleanupSettingsUpdated = null
+      }
     }
     void setupEvents()
     return () => {
       cleanupHotkey?.()
+      cleanupSettingsUpdated?.()
     }
   }, [])
 
@@ -207,6 +222,7 @@ function SettingsWindow() {
 
 function PopoverWindow() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
+  const [selectionAnchor, setSelectionAnchor] = useState<SelectionAnchor | null>(null)
   const lastLoggedStateRef = useRef<string>('idle')
   const { state, data, error, close, openFromSelection } = usePopover(settings)
 
@@ -214,6 +230,7 @@ function PopoverWindow() {
     try {
       const pending = await invoke<SelectionEventPayload | null>('take_pending_selection')
       if (pending?.text.trim()) {
+        setSelectionAnchor(pending.anchor ?? null)
         appendDebugLog('popover', 'Consume pending selection', `${pending.trigger} | "${shortText(pending.text)}"`)
         await openFromSelection(pending.text, pending.trigger)
       }
@@ -249,10 +266,29 @@ function PopoverWindow() {
   }, [])
 
   useEffect(() => {
+    let cleanupSettingsUpdated: (() => void) | null = null
+    const setupSettingsSync = async () => {
+      try {
+        const unlistenSettingsUpdated = await listen<SettingsUpdatedPayload>('settings-updated', (event) => {
+          setSettings((previous) => sanitizeSettings({ ...previous, ...event.payload }))
+        })
+        cleanupSettingsUpdated = unlistenSettingsUpdated
+      } catch {
+        cleanupSettingsUpdated = null
+      }
+    }
+    void setupSettingsSync()
+    return () => {
+      cleanupSettingsUpdated?.()
+    }
+  }, [])
+
+  useEffect(() => {
     let cleanupSelection: (() => void) | null = null
     const setupEvents = async () => {
       try {
         const unlistenSelection = await listen<SelectionEventPayload>('selection-changed', (event) => {
+          setSelectionAnchor(event.payload.anchor ?? null)
           appendDebugLog('popover', 'Selection changed', `${event.payload.trigger} | "${shortText(event.payload.text)}"`)
           void openFromSelection(event.payload.text, event.payload.trigger)
         })
@@ -332,10 +368,11 @@ function PopoverWindow() {
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as Node | null
       const popover = document.querySelector('.apl-popover')
-      if (!popover || !target) {
+      const subpanel = document.querySelector('.apl-subpanel')
+      if (!target) {
         return
       }
-      if (popover.contains(target)) {
+      if (popover?.contains(target) || subpanel?.contains(target)) {
         return
       }
       closePopover('outside-click')
@@ -367,6 +404,9 @@ function PopoverWindow() {
         translation={data.translation}
         error={error}
         panelMode={settings.popover_open_panel_mode}
+        enableAudio={settings.enable_audio}
+        autoPlayAudioMode={settings.auto_play_audio_mode}
+        selectionAnchor={selectionAnchor}
         onOpenSettings={openSettingsWindow}
       />
     </main>
@@ -375,12 +415,7 @@ function PopoverWindow() {
 
 function HotkeyIndicatorWindow() {
   return (
-    <main className="apl-hotkey-indicator-shell" role="status" aria-live="polite">
-      <div className="apl-hotkey-indicator">
-        <span className="apl-hotkey-indicator-dot" aria-hidden="true" />
-        <span className="apl-hotkey-indicator-text">Converting...</span>
-      </div>
-    </main>
+    <main className="apl-hotkey-indicator-shell" role="status" aria-live="polite" />
   )
 }
 
