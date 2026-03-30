@@ -97,7 +97,7 @@ pub async fn save_config(app: AppHandle, state: State<'_, AppState>, config: App
         *guard = clean.clone();
     }
     config::save_config_to_disk(&app, &clean)?;
-    hotkey::replace_registered_hotkey(&app, &clean.hotkey_translate_shortcut)?;
+    hotkey::register_hotkeys(&app, &clean)?;
     Ok(clean)
 }
 
@@ -114,4 +114,14 @@ pub async fn lookup_dictionary(state: State<'_, AppState>, payload: LookupPayloa
 #[tauri::command]
 pub async fn emit_selection_changed(app: AppHandle, text: String, trigger: String) -> Result<(), String> {
     selection::emit_selection_changed(&app, text, trigger)
+}
+
+#[tauri::command]
+pub fn hide_popover(app: AppHandle) -> Result<(), String> {
+    selection::hide_popover_window(&app)
+}
+
+#[tauri::command]
+pub fn take_pending_selection() -> Result<Option<selection::SelectionEvent>, String> {
+    selection::take_pending_selection()
 }

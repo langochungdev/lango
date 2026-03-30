@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AppConfig {
     pub enable_lookup: bool,
     pub enable_translate: bool,
@@ -13,6 +14,8 @@ pub struct AppConfig {
     pub popover_shortcut: String,
     pub source_language: String,
     pub target_language: String,
+    pub quick_translate_source_language: String,
+    pub quick_translate_target_language: String,
     pub max_definitions: u8,
     pub show_example: bool,
     pub popover_open_panel_mode: String,
@@ -31,6 +34,8 @@ impl Default for AppConfig {
             popover_shortcut: "Ctrl+Shift+D".to_owned(),
             source_language: "auto".to_owned(),
             target_language: "en".to_owned(),
+            quick_translate_source_language: "auto".to_owned(),
+            quick_translate_target_language: "en".to_owned(),
             max_definitions: 3,
             show_example: true,
             popover_open_panel_mode: "details".to_owned(),
@@ -53,8 +58,17 @@ impl AppConfig {
         if next.popover_shortcut.is_empty() {
             next.popover_shortcut = "Ctrl+Shift+D".to_owned();
         }
+        if next.source_language.is_empty() {
+            next.source_language = "auto".to_owned();
+        }
         if next.target_language.is_empty() {
             next.target_language = "en".to_owned();
+        }
+        if next.quick_translate_source_language.is_empty() {
+            next.quick_translate_source_language = "auto".to_owned();
+        }
+        if next.quick_translate_target_language.is_empty() {
+            next.quick_translate_target_language = "en".to_owned();
         }
         if next.popover_open_panel_mode.is_empty() {
             next.popover_open_panel_mode = "details".to_owned();
@@ -98,7 +112,8 @@ pub fn load_config_from_disk(app: &AppHandle) -> AppConfig {
 
 pub fn save_config_to_disk(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
     let path = config_path(app)?;
-    let bytes = serde_json::to_vec_pretty(config).map_err(|err| format!("serialize config failed: {err}"))?;
+    let bytes = serde_json::to_vec_pretty(config)
+        .map_err(|err| format!("serialize config failed: {err}"))?;
     fs::write(path, bytes).map_err(|err| format!("write config failed: {err}"))
 }
 

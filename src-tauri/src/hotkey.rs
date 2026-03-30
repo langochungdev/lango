@@ -1,9 +1,11 @@
-use arboard::Clipboard;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
+use crate::automation;
 use crate::bridge::{self, AppState, TranslatePayload};
+use crate::config::AppConfig;
+use crate::selection;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct HotkeyTranslationEvent {
@@ -11,8 +13,18 @@ pub struct HotkeyTranslationEvent {
     pub translated: String,
 }
 
-pub fn sanitize_inject(input: &str) -> String {
-    input.replace('\r', "").trim().to_owned()
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HotkeyAction {
+    ShowPopover,
+    TranslateReplace,
+}
+
+fn normalize_shortcut(shortcut: &str) -> String {
+    shortcut
+        .split('+')
+        .map(|part| part.trim().to_ascii_lowercase())
+        .collect::<Vec<String>>()
+        .join("+")
 }
 
 fn is_valid_modifier(token: &str) -> bool {
@@ -32,7 +44,10 @@ fn is_valid_key_token(token: &str) -> bool {
     if let Some(rest) = token.strip_prefix('F') {
         return !rest.is_empty() && rest.chars().all(|ch| ch.is_ascii_digit());
     }
-    matches!(token.to_ascii_lowercase().as_str(), "space" | "enter" | "tab")
+    matches!(
+        token.to_ascii_lowercase().as_str(),
+        "space" | "enter" | "tab"
+    )
 }
 
 pub fn parse_hotkey(shortcut: &str) -> Result<(), String> {
@@ -56,18 +71,47 @@ pub fn parse_hotkey(shortcut: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn replace_registered_hotkey(app: &AppHandle, shortcut: &str) -> Result<(), String> {
-    parse_hotkey(shortcut)?;
+pub fn register_hotkeys(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
+    parse_hotkey(&config.popover_shortcut)?;
+    parse_hotkey(&config.hotkey_translate_shortcut)?;
+
+    let popover_shortcut = config.popover_shortcut.trim();
+    let translate_shortcut = config.hotkey_translate_shortcut.trim();
     let manager = app.global_shortcut();
     manager
         .unregister_all()
         .map_err(|err| format!("unregister hotkeys failed: {err}"))?;
     manager
-        .register(shortcut)
-        .map_err(|err| format!("register hotkey failed: {err}"))
+        .register(popover_shortcut)
+        .map_err(|err| format!("register popover shortcut failed: {err}"))?;
+
+    if normalize_shortcut(popover_shortcut) != normalize_shortcut(translate_shortcut) {
+        manager
+            .register(translate_shortcut)
+            .map_err(|err| format!("register translate shortcut failed: {err}"))?;
+    }
+
+    Ok(())
 }
 
-pub async fn on_hotkey_triggered(app: AppHandle) -> Result<(), String> {
+fn resolve_shortcut_action(config: &AppConfig, shortcut: &str) -> Option<HotkeyAction> {
+    let incoming = normalize_shortcut(shortcut);
+    let popover = normalize_shortcut(&config.popover_shortcut);
+    let translate = normalize_shortcut(&config.hotkey_translate_shortcut);
+
+    if popover == translate && incoming == translate {
+        return Some(HotkeyAction::TranslateReplace);
+    }
+    if incoming == popover {
+        return Some(HotkeyAction::ShowPopover);
+    }
+    if incoming == translate {
+        return Some(HotkeyAction::TranslateReplace);
+    }
+    None
+}
+
+pub async fn handle_global_shortcut(app: AppHandle, shortcut: String) -> Result<(), String> {
     let state = app.state::<AppState>();
     let config = {
         let guard = state
@@ -77,43 +121,78 @@ pub async fn on_hotkey_triggered(app: AppHandle) -> Result<(), String> {
         guard.clone()
     };
 
-    let mut clipboard = Clipboard::new().map_err(|err| format!("open clipboard failed: {err}"))?;
-    let original = clipboard
-        .get_text()
-        .map_err(|err| format!("read clipboard failed: {err}"))?;
-    let sanitized = sanitize_inject(&original);
-    if sanitized.is_empty() {
+    let Some(action) = resolve_shortcut_action(&config, &shortcut) else {
+        return Ok(());
+    };
+
+    match action {
+        HotkeyAction::ShowPopover => on_popover_triggered(app).await,
+        HotkeyAction::TranslateReplace => on_translate_replace_triggered(app, config).await,
+    }
+}
+
+async fn on_popover_triggered(app: AppHandle) -> Result<(), String> {
+    let raw_text = tauri::async_runtime::spawn_blocking(automation::capture_selection_text)
+        .await
+        .map_err(|err| format!("capture selection task failed: {err}"))??;
+    let selected = raw_text.replace('\r', "");
+    if selected.trim().is_empty() {
+        return Ok(());
+    }
+
+    let cursor = tauri::async_runtime::spawn_blocking(automation::cursor_position)
+        .await
+        .map_err(|err| format!("capture cursor task failed: {err}"))?;
+
+    selection::show_popover_window(
+        &app,
+        selected.trim().to_owned(),
+        "shortcut".to_owned(),
+        cursor,
+    )
+}
+
+async fn on_translate_replace_triggered(app: AppHandle, config: AppConfig) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let original = tauri::async_runtime::spawn_blocking(automation::capture_active_document_text)
+        .await
+        .map_err(|err| format!("capture active document task failed: {err}"))??;
+
+    let source_text = original.replace('\r', "");
+    if source_text.trim().is_empty() {
         return Ok(());
     }
 
     let payload = TranslatePayload {
-        text: sanitized.clone(),
-        source: config.source_language,
-        target: config.target_language,
+        text: source_text.clone(),
+        source: config.quick_translate_source_language,
+        target: config.quick_translate_target_language,
     };
 
     let response = bridge::translate_via_sidecar(&state.client, payload).await?;
-    clipboard
-        .set_text(response.result.clone())
-        .map_err(|err| format!("write clipboard failed: {err}"))?;
+    let translated = response.result.replace('\r', "");
+    if translated.trim().is_empty() {
+        return Ok(());
+    }
+
+    let replacement = translated.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        automation::replace_active_document_text(&replacement)
+    })
+    .await
+    .map_err(|err| format!("replace text task failed: {err}"))??;
 
     let event = HotkeyTranslationEvent {
-        original: sanitized,
-        translated: response.result,
+        original: source_text,
+        translated,
     };
-    app.emit("hotkey-translated", event)
+    app.emit_to("main", "hotkey-translated", event)
         .map_err(|err| format!("emit hotkey event failed: {err}"))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_hotkey, sanitize_inject};
-
-    #[test]
-    fn test_sanitize_text_for_inject() {
-        assert_eq!(sanitize_inject("hello\r\n"), "hello");
-        assert_eq!(sanitize_inject("  spaces  "), "spaces");
-    }
+    use super::parse_hotkey;
 
     #[test]
     fn test_hotkey_parse() {

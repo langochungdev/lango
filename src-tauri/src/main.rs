@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod automation;
 mod bridge;
 mod config;
 mod hotkey;
@@ -16,8 +17,9 @@ fn main() {
                 .with_handler(|app, _shortcut, event| {
                     if event.state() == ShortcutState::Pressed {
                         let app_handle = app.clone();
+                        let shortcut = _shortcut.to_string();
                         tauri::async_runtime::spawn(async move {
-                            let _ = hotkey::on_hotkey_triggered(app_handle).await;
+                            let _ = hotkey::handle_global_shortcut(app_handle, shortcut).await;
                         });
                     }
                 })
@@ -31,7 +33,7 @@ fn main() {
                 client: Client::new(),
             };
             app.manage(state);
-            hotkey::replace_registered_hotkey(&app_handle, &loaded.hotkey_translate_shortcut)?;
+            hotkey::register_hotkeys(&app_handle, &loaded)?;
             selection::start_selection_listener(app_handle);
             Ok(())
         })
@@ -40,7 +42,9 @@ fn main() {
             bridge::save_config,
             bridge::translate_text,
             bridge::lookup_dictionary,
-            bridge::emit_selection_changed
+            bridge::emit_selection_changed,
+            bridge::hide_popover,
+            bridge::take_pending_selection
         ])
         .run(tauri::generate_context!())
         .expect("error while running DictOver Desktop");

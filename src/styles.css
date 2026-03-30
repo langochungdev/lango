@@ -20,10 +20,23 @@ body {
     background: var(--bg-main);
 }
 
+body.apl-popover-body {
+    min-height: auto;
+    background: transparent;
+}
+
 .apl-app-shell {
     max-width: 980px;
     margin: 0 auto;
     padding: 2rem 1rem 6rem;
+    display: grid;
+    gap: 1rem;
+}
+
+.apl-settings-shell {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 1rem;
     display: grid;
     gap: 1rem;
 }
@@ -62,12 +75,16 @@ p {
 
 .apl-card input,
 .apl-settings-grid select,
-.apl-settings-grid input {
+.apl-settings-grid input:not([type='checkbox']) {
     width: 100%;
     padding: 0.62rem 0.7rem;
     border-radius: 10px;
     border: 1px solid var(--line-soft);
     font-size: 1rem;
+}
+
+.apl-settings-grid input[type='range'] {
+    padding: 0;
 }
 
 button {
@@ -96,39 +113,125 @@ button {
 
 .apl-popover {
     position: fixed;
-    left: 50%;
+    left: 12px;
     top: 12px;
-    transform: translateX(-50%);
-    width: min(560px, calc(100vw - 20px));
+    width: min(560px, calc(100vw - 24px));
+    max-height: min(55vh, 420px);
+    overflow: auto;
+    border: 1px solid #d7dde9;
+    border-radius: 12px;
+    background: #ffffff;
+    color: #121826;
+    box-shadow: 0 14px 36px rgba(18, 24, 38, 0.16);
     z-index: 9999;
-    padding: 0.8rem;
+    padding: 0.72rem;
     display: grid;
-    gap: 0.8rem;
+    gap: 0.65rem;
+}
+
+.apl-popover-shell {
+    width: 100vw;
+    padding: 0.4rem;
+}
+
+.apl-popover-shell .apl-popover {
+    position: static;
+    inset: auto;
+    width: 100%;
+    max-height: min(72vh, 560px);
+    overflow: auto;
+    margin: 0;
 }
 
 .apl-popover-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.8rem;
+    gap: 0.7rem;
+}
+
+.apl-popover-header h2 {
+    font-size: 1rem;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}
+
+.apl-close-btn {
+    background: transparent;
+    color: #44506a;
+    border: 1px solid #d7dde9;
+    border-radius: 8px;
+    padding: 0.34rem 0.55rem;
+    font-size: 0.86rem;
+}
+
+@media (hover: hover) {
+    .apl-close-btn:hover {
+        background: #f5f7fb;
+        color: #223250;
+    }
 }
 
 .apl-subpanel {
-    border: 1px solid var(--line-soft);
-    border-radius: 12px;
-    padding: 0.6rem;
-    color: var(--ink-muted);
+    border: 1px solid #d7dde9;
+    border-radius: 10px;
+    color: #24324a;
+    background: #ffffff;
     z-index: 10001;
+}
+
+.apl-subpanel-body {
+    padding: 0.52rem 0.56rem;
+    display: grid;
+    gap: 0.56rem;
 }
 
 .apl-content {
     display: grid;
-    gap: 0.8rem;
+    gap: 0.55rem;
+}
+
+.apl-content--lookup,
+.apl-content--translate {
+    text-align: left;
+}
+
+.apl-lookup-word {
+    font-weight: 700;
+    color: #111827;
+    overflow-wrap: anywhere;
+}
+
+.apl-lookup-summary {
+    color: #24324a;
+    overflow-wrap: anywhere;
+}
+
+.apl-translation {
+    color: #1f2f49;
+    overflow-wrap: anywhere;
+}
+
+.apl-status {
+    min-height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
 }
 
 .apl-meaning {
     display: grid;
     gap: 0.35rem;
+    padding-bottom: 0.5rem;
+}
+
+.apl-meaning:last-child {
+    padding-bottom: 0;
+}
+
+.apl-meaning+.apl-meaning {
+    border-top: 1px dashed #c8d3ea;
+    padding-top: 0.55rem;
 }
 
 .apl-meaning ul {
@@ -142,7 +245,7 @@ button {
 .apl-meta,
 .apl-example,
 .apl-status {
-    color: var(--ink-muted);
+    color: #4d5b79;
 }
 
 .apl-error {
@@ -154,25 +257,85 @@ button {
     left: 50%;
     top: 20px;
     transform: translateX(-50%);
-    width: min(760px, calc(100vw - 16px));
+    width: min(840px, calc(100vw - 18px));
     max-height: calc(100vh - 40px);
     overflow: auto;
     z-index: 10030;
-    padding: 1rem;
+    padding: 0.95rem;
     display: grid;
-    gap: 1rem;
+    gap: 0.9rem;
+    border: 1px solid #d7dde9;
+    border-radius: 14px;
+    background: #ffffff;
+    box-shadow: 0 20px 48px rgba(18, 24, 38, 0.2);
+}
+
+.apl-settings-shell .apl-settings-root {
+    position: static;
+    left: auto;
+    top: auto;
+    transform: none;
+    width: 100%;
+    max-height: none;
+    overflow: visible;
+}
+
+.apl-settings-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.apl-settings-sections {
+    display: grid;
+    gap: 0.72rem;
+}
+
+.apl-settings-section {
+    border: 1px solid #e3eaf8;
+    border-radius: 11px;
+    background: #f9fbff;
+    padding: 0.75rem;
+    display: grid;
+    gap: 0.65rem;
+}
+
+.apl-settings-section h3 {
+    margin: 0;
+    font-size: 0.82rem;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: #213250;
 }
 
 .apl-settings-grid {
     display: grid;
-    gap: 0.8rem;
+    gap: 0.72rem;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .apl-settings-grid label {
-    display: grid;
+    display: flex;
+    flex-direction: column;
     gap: 0.35rem;
-    color: var(--ink-muted);
+    color: #44506a;
+    font-size: 0.92rem;
+}
+
+.apl-settings-toggle-row {
+    flex-direction: row !important;
+    align-items: center;
+    gap: 0.55rem !important;
+    border: 1px solid #dce5f7;
+    border-radius: 8px;
+    background: #ffffff;
+    padding: 0.52rem 0.6rem;
+}
+
+.apl-settings-toggle-row input[type='checkbox'] {
+    width: 16px;
+    height: 16px;
+    margin: 0;
 }
 
 .apl-settings-actions {

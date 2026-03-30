@@ -8,14 +8,19 @@ import { invokeWithFallback } from "@/services/tauri";
 const LOCAL_KEY = "dictover-settings";
 
 export async function loadSettings(): Promise<AppSettings> {
-  return invokeWithFallback<AppSettings>("load_config", {}, async () => {
-    const raw = localStorage.getItem(LOCAL_KEY);
-    if (!raw) {
-      return DEFAULT_SETTINGS;
-    }
-    const parsed = JSON.parse(raw) as Partial<AppSettings>;
-    return sanitizeSettings(parsed);
-  });
+  const loaded = await invokeWithFallback<Partial<AppSettings>>(
+    "load_config",
+    {},
+    async () => {
+      const raw = localStorage.getItem(LOCAL_KEY);
+      if (!raw) {
+        return DEFAULT_SETTINGS;
+      }
+      return JSON.parse(raw) as Partial<AppSettings>;
+    },
+  );
+
+  return sanitizeSettings(loaded);
 }
 
 export async function saveSettings(

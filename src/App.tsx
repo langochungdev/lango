@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { Popover } from '@/components/Popover/Popover'
 import { SettingsPanel } from '@/components/Settings/SettingsPanel'
-import { FloatingSettingsButton } from '@/components/FloatingBtn/FloatingSettingsButton'
 import { usePopover } from '@/hooks/usePopover'
-import { useTranslate } from '@/hooks/useTranslate'
 import { loadSettings, saveSettings } from '@/services/config'
 import { DEFAULT_SETTINGS, type AppSettings } from '@/types/settings'
 
@@ -17,13 +16,13 @@ interface HotkeyTranslationPayload {
   translated: string
 }
 
-export function App() {
+const IS_POPOVER_WINDOW =
+  typeof window !== 'undefined' &&
+  new URLSearchParams(window.location.search).get('window') === 'popover'
+
+function SettingsWindow() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  const [activeFieldValue, setActiveFieldValue] = useState('xin chao')
   const [statusMessage, setStatusMessage] = useState('Ready')
-  const { state, data, error, close, openFromSelection } = usePopover(settings)
-  const { status: translateStatus, runTranslate, error: translateError } = useTranslate()
 
   useEffect(() => {
     let mounted = true
@@ -46,8 +45,90 @@ export function App() {
   }, [])
 
   useEffect(() => {
-    let cleanupSelection: (() => void) | null = null
     let cleanupHotkey: (() => void) | null = null
+    const setupEvents = async () => {
+      try {
+        const unlistenHotkey = await listen<HotkeyTranslationPayload>('hotkey-translated', (event) => {
+          if (event.payload.translated.trim()) {
+            setStatusMessage('Global translate shortcut replaced active text')
+          }
+        })
+        cleanupHotkey = unlistenHotkey
+      } catch {
+        cleanupHotkey = null
+      }
+    }
+    void setupEvents()
+    return () => {
+      cleanupHotkey?.()
+    }
+  }, [])
+
+  const handleSaveSettings = async () => {
+    try {
+      const saved = await saveSettings(settings)
+      setSettings(saved)
+      setStatusMessage('Settings saved')
+    } catch {
+      setStatusMessage('Failed to save settings')
+    }
+  }
+
+  return (
+    <main className="apl-settings-shell">
+      <section className="apl-card">
+        <h1>DictOver Settings</h1>
+        <p>Window chính chỉ dùng để cấu hình. Popover và hotkey chạy toàn hệ thống qua native backend.</p>
+        <p>{statusMessage}</p>
+      </section>
+
+      <SettingsPanel
+        open
+        settings={settings}
+        onChange={setSettings}
+        onSave={handleSaveSettings}
+      />
+    </main>
+  )
+}
+
+function PopoverWindow() {
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
+  const { state, data, error, close, openFromSelection } = usePopover(settings)
+
+  const consumePendingSelection = useCallback(async () => {
+    try {
+      const pending = await invoke<SelectionEventPayload | null>('take_pending_selection')
+      if (pending?.text.trim()) {
+        await openFromSelection(pending.text, pending.trigger)
+      }
+    } catch {
+      return
+    }
+  }, [openFromSelection])
+
+  useEffect(() => {
+    let mounted = true
+    const setup = async () => {
+      try {
+        const current = await loadSettings()
+        if (mounted) {
+          setSettings(current)
+        }
+      } catch {
+        if (mounted) {
+          setSettings(DEFAULT_SETTINGS)
+        }
+      }
+    }
+    void setup()
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let cleanupSelection: (() => void) | null = null
     const setupEvents = async () => {
       try {
         const unlistenSelection = await listen<SelectionEventPayload>('selection-changed', (event) => {
@@ -57,93 +138,34 @@ export function App() {
       } catch {
         cleanupSelection = null
       }
-      try {
-        const unlistenHotkey = await listen<HotkeyTranslationPayload>('hotkey-translated', (event) => {
-          setActiveFieldValue(event.payload.translated)
-          setStatusMessage('Field replaced from global hotkey')
-        })
-        cleanupHotkey = unlistenHotkey
-      } catch {
-        cleanupHotkey = null
-      }
+
+      await consumePendingSelection()
     }
     void setupEvents()
     return () => {
       cleanupSelection?.()
-      cleanupHotkey?.()
     }
-  }, [openFromSelection])
+  }, [consumePendingSelection, openFromSelection])
 
-  const selectedWordCount = useMemo(() => {
-    if (!data.selectedText) {
-      return 0
-    }
-    return data.selectedText.trim().split(/\s+/).filter(Boolean).length
-  }, [data.selectedText])
+  const closePopover = useCallback(() => {
+    close()
+    void invoke('hide_popover')
+  }, [close])
 
-  const handleSelection = () => {
-    const selectedText = window.getSelection()?.toString().trim() ?? ''
-    if (!selectedText) {
-      return
+  useEffect(() => {
+    const onKeydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closePopover()
+      }
     }
-    void openFromSelection(selectedText, 'auto')
-  }
-
-  const handleSaveSettings = async () => {
-    try {
-      const saved = await saveSettings(settings)
-      setSettings(saved)
-      setSettingsOpen(false)
-      setStatusMessage('Settings saved')
-    } catch {
-      setStatusMessage('Failed to save settings')
+    window.addEventListener('keydown', onKeydown)
+    return () => {
+      window.removeEventListener('keydown', onKeydown)
     }
-  }
-
-  const handleFieldTranslate = async () => {
-    try {
-      const source = settings.source_language
-      const translated = await runTranslate(activeFieldValue, source, settings.target_language)
-      setActiveFieldValue(translated.result)
-      setStatusMessage(`Translated by ${translated.engine}`)
-    } catch {
-      setStatusMessage('Translate failed')
-    }
-  }
+  }, [closePopover])
 
   return (
-    <main className="apl-app-shell">
-      <section className="apl-hero">
-        <h1>DictOver Desktop</h1>
-        <p>Step 2 core app shell with popover lookup, quick translation, settings, and CI-ready structure.</p>
-      </section>
-
-      <section className="apl-card" onMouseUp={handleSelection}>
-        <h2>Selection Probe</h2>
-        <p data-testid="selectable-text">
-          Select one word for dictionary lookup or multiple words for translation. The popover state machine follows idle,
-          loading, lookup, translate, error.
-        </p>
-        <button type="button" onClick={() => void openFromSelection('xin chao', 'shortcut')}>
-          Trigger Shortcut Mode Sample
-        </button>
-        <p>Words selected: {selectedWordCount}</p>
-      </section>
-
-      <section className="apl-card">
-        <h2>Hotkey Translation Field</h2>
-        <input
-          data-testid="translate-field"
-          value={activeFieldValue}
-          onChange={(event) => setActiveFieldValue(event.target.value)}
-        />
-        <button type="button" onClick={() => void handleFieldTranslate()}>
-          Translate Active Field
-        </button>
-        <p>{statusMessage}</p>
-        {translateStatus === 'error' && <p className="apl-error">{translateError}</p>}
-      </section>
-
+    <main className="apl-popover-shell">
       <Popover
         state={state}
         selection={data.selectedText}
@@ -151,18 +173,23 @@ export function App() {
         translation={data.translation}
         error={error}
         panelMode={settings.popover_open_panel_mode}
-        onClose={close}
+        onClose={closePopover}
       />
-
-      <SettingsPanel
-        open={settingsOpen}
-        settings={settings}
-        onChange={setSettings}
-        onSave={handleSaveSettings}
-        onClose={() => setSettingsOpen(false)}
-      />
-
-      <FloatingSettingsButton onClick={() => setSettingsOpen(true)} />
     </main>
   )
+}
+
+export function App() {
+  useEffect(() => {
+    document.body.classList.toggle('apl-popover-body', IS_POPOVER_WINDOW)
+    return () => {
+      document.body.classList.remove('apl-popover-body')
+    }
+  }, [])
+
+  if (IS_POPOVER_WINDOW) {
+    return <PopoverWindow />
+  }
+
+  return <SettingsWindow />
 }
