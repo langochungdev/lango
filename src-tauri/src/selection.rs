@@ -4,14 +4,25 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Position};
 
 use crate::automation;
+use crate::bridge::AppState;
+use crate::hotkey;
 
 struct AutoSelectionState {
     last_text: String,
     last_emit: Instant,
 }
 
+struct ModifierHotkeyState {
+    shift_pressed_count: u8,
+    shift_started_at: Option<Instant>,
+    blocked: bool,
+}
+
 static AUTO_SELECTION_STATE: OnceLock<Mutex<AutoSelectionState>> = OnceLock::new();
 static PENDING_SELECTION_EVENT: OnceLock<Mutex<Option<SelectionEvent>>> = OnceLock::new();
+static MODIFIER_HOTKEY_STATE: OnceLock<Mutex<ModifierHotkeyState>> = OnceLock::new();
+
+const SHIFT_TRIGGER_MAX_HOLD_MS: u64 = 700;
 
 fn auto_selection_state() -> &'static Mutex<AutoSelectionState> {
     AUTO_SELECTION_STATE.get_or_init(|| {
@@ -24,6 +35,83 @@ fn auto_selection_state() -> &'static Mutex<AutoSelectionState> {
 
 fn pending_selection_event() -> &'static Mutex<Option<SelectionEvent>> {
     PENDING_SELECTION_EVENT.get_or_init(|| Mutex::new(None))
+}
+
+fn modifier_hotkey_state() -> &'static Mutex<ModifierHotkeyState> {
+    MODIFIER_HOTKEY_STATE.get_or_init(|| {
+        Mutex::new(ModifierHotkeyState {
+            shift_pressed_count: 0,
+            shift_started_at: None,
+            blocked: false,
+        })
+    })
+}
+
+fn is_shift_key(key: rdev::Key) -> bool {
+    matches!(key, rdev::Key::ShiftLeft | rdev::Key::ShiftRight)
+}
+
+fn on_modifier_hotkey_event(app: &AppHandle, event_type: &rdev::EventType) {
+    match event_type {
+        rdev::EventType::KeyPress(key) => {
+            let Ok(mut guard) = modifier_hotkey_state().lock() else {
+                return;
+            };
+
+            if is_shift_key(*key) {
+                if guard.shift_pressed_count == 0 {
+                    guard.shift_started_at = Some(Instant::now());
+                    guard.blocked = false;
+                }
+                guard.shift_pressed_count = guard.shift_pressed_count.saturating_add(1).min(2);
+                return;
+            }
+
+            if guard.shift_pressed_count > 0 {
+                guard.blocked = true;
+            }
+        }
+        rdev::EventType::KeyRelease(key) => {
+            if !is_shift_key(*key) {
+                return;
+            }
+
+            let should_trigger = {
+                let Ok(mut guard) = modifier_hotkey_state().lock() else {
+                    return;
+                };
+
+                if guard.shift_pressed_count == 0 {
+                    return;
+                }
+
+                guard.shift_pressed_count = guard.shift_pressed_count.saturating_sub(1);
+                if guard.shift_pressed_count > 0 {
+                    return;
+                }
+
+                let quick_tap = guard
+                    .shift_started_at
+                    .map(|started| {
+                        started.elapsed() <= Duration::from_millis(SHIFT_TRIGGER_MAX_HOLD_MS)
+                    })
+                    .unwrap_or(false);
+                let allowed = quick_tap && !guard.blocked;
+
+                guard.shift_started_at = None;
+                guard.blocked = false;
+                allowed
+            };
+
+            if should_trigger {
+                let app_for_task = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = hotkey::handle_modifier_shortcut(app_for_task).await;
+                });
+            }
+        }
+        _ => {}
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,6 +139,8 @@ pub fn start_selection_listener(app: AppHandle) {
     std::thread::spawn(move || {
         let app_for_listener = app.clone();
         let callback = move |event: rdev::Event| {
+            on_modifier_hotkey_event(&app_for_listener, &event.event_type);
+
             if let rdev::EventType::ButtonRelease(rdev::Button::Left) = event.event_type {
                 let app_for_task = app_for_listener.clone();
                 tauri::async_runtime::spawn(async move {
@@ -65,7 +155,7 @@ pub fn start_selection_listener(app: AppHandle) {
     });
 }
 
-fn is_any_app_window_focused(app: &AppHandle) -> bool {
+pub(crate) fn is_any_app_window_focused(app: &AppHandle) -> bool {
     if let Some(main) = app.get_webview_window("main") {
         if main.is_focused().unwrap_or(false) {
             return true;
@@ -76,10 +166,27 @@ fn is_any_app_window_focused(app: &AppHandle) -> bool {
             return true;
         }
     }
+    if let Some(indicator) = app.get_webview_window("hotkey-indicator") {
+        if indicator.is_focused().unwrap_or(false) {
+            return true;
+        }
+    }
     false
 }
 
 async fn on_auto_selection(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let config = {
+        let guard = state
+            .config
+            .lock()
+            .map_err(|_| "config lock poisoned".to_owned())?;
+        guard.clone()
+    };
+    if config.popover_trigger_mode != "auto" {
+        return Ok(());
+    }
+
     if is_any_app_window_focused(&app) {
         return Ok(());
     }

@@ -116,8 +116,8 @@ export function SettingsPanel({ open, settings, onChange, onClose }: SettingsPan
       const shortcut = buildShortcutFromEvent(event)
       if (!shortcut) {
         if (event.key === 'Shift') {
-          const fallback = field === 'hotkey_translate_shortcut' ? 'Ctrl+Shift+T' : 'Ctrl+Shift+D'
-          onChange(setField(settings, field, fallback))
+          const nextShortcut = field === 'hotkey_translate_shortcut' ? 'Shift' : 'Ctrl+Shift+D'
+          onChange(setField(settings, field, nextShortcut))
         }
         return
       }

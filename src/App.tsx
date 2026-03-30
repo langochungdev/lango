@@ -35,9 +35,12 @@ type SettingsStatus =
   | 'saveFailed'
   | 'hotkeyTranslated'
 
-const IS_POPOVER_WINDOW =
+const WINDOW_MODE =
   typeof window !== 'undefined' &&
-  new URLSearchParams(window.location.search).get('window') === 'popover'
+  new URLSearchParams(window.location.search).get('window')
+
+const IS_POPOVER_WINDOW = WINDOW_MODE === 'popover'
+const IS_HOTKEY_INDICATOR_WINDOW = WINDOW_MODE === 'hotkey-indicator'
 
 function shortText(value: string, max = 72): string {
   const clean = value.replace(/\s+/g, ' ').trim()
@@ -368,13 +371,30 @@ function PopoverWindow() {
   )
 }
 
+function HotkeyIndicatorWindow() {
+  return (
+    <main className="apl-hotkey-indicator-shell" role="status" aria-live="polite">
+      <div className="apl-hotkey-indicator">
+        <span className="apl-hotkey-indicator-dot" aria-hidden="true" />
+        <span className="apl-hotkey-indicator-text">Converting...</span>
+      </div>
+    </main>
+  )
+}
+
 export function App() {
   useEffect(() => {
     document.body.classList.toggle('apl-popover-body', IS_POPOVER_WINDOW)
+    document.body.classList.toggle('apl-hotkey-indicator-body', IS_HOTKEY_INDICATOR_WINDOW)
     return () => {
       document.body.classList.remove('apl-popover-body')
+      document.body.classList.remove('apl-hotkey-indicator-body')
     }
   }, [])
+
+  if (IS_HOTKEY_INDICATOR_WINDOW) {
+    return <HotkeyIndicatorWindow />
+  }
 
   if (IS_POPOVER_WINDOW) {
     return <PopoverWindow />

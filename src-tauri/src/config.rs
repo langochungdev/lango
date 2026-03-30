@@ -26,7 +26,7 @@ fn is_valid_key_token(token: &str) -> bool {
     )
 }
 
-fn sanitize_shortcut(raw: &str, fallback: &str) -> String {
+fn sanitize_shortcut(raw: &str, fallback: &str, allow_modifier_only: bool) -> String {
     let parts: Vec<&str> = raw
         .split('+')
         .map(|part| part.trim())
@@ -48,6 +48,13 @@ fn sanitize_shortcut(raw: &str, fallback: &str) -> String {
         if key_count > 1 || index != parts.len() - 1 {
             return fallback.to_owned();
         }
+    }
+
+    if key_count == 0 && allow_modifier_only {
+        if parts.len() == 1 && parts[0].eq_ignore_ascii_case("shift") {
+            return "Shift".to_owned();
+        }
+        return fallback.to_owned();
     }
 
     if key_count != 1 {
@@ -84,7 +91,7 @@ impl Default for AppConfig {
             enable_translate: true,
             enable_audio: true,
             auto_play_audio_mode: "word".to_owned(),
-            popover_trigger_mode: "auto".to_owned(),
+            popover_trigger_mode: "shortcut".to_owned(),
             popover_shortcut: "Ctrl+Shift+D".to_owned(),
             source_language: "en".to_owned(),
             target_language: "vi".to_owned(),
@@ -94,7 +101,7 @@ impl Default for AppConfig {
             show_example: true,
             popover_open_panel_mode: "details".to_owned(),
             popover_definition_language_mode: "output".to_owned(),
-            hotkey_translate_shortcut: "Ctrl+Shift+T".to_owned(),
+            hotkey_translate_shortcut: "Shift".to_owned(),
         }
     }
 }
@@ -110,10 +117,8 @@ impl AppConfig {
         if next.auto_play_audio_mode.is_empty() {
             next.auto_play_audio_mode = "word".to_owned();
         }
-        if next.popover_trigger_mode.is_empty() {
-            next.popover_trigger_mode = "auto".to_owned();
-        }
-        next.popover_shortcut = sanitize_shortcut(&next.popover_shortcut, "Ctrl+Shift+D");
+        next.popover_trigger_mode = "shortcut".to_owned();
+        next.popover_shortcut = sanitize_shortcut(&next.popover_shortcut, "Ctrl+Shift+D", false);
         if next.source_language.is_empty() {
             next.source_language = "en".to_owned();
         }
@@ -133,7 +138,7 @@ impl AppConfig {
             next.popover_definition_language_mode = "output".to_owned();
         }
         next.hotkey_translate_shortcut =
-            sanitize_shortcut(&next.hotkey_translate_shortcut, "Ctrl+Shift+T");
+            sanitize_shortcut(&next.hotkey_translate_shortcut, "Shift", true);
         next
     }
 }

@@ -1,17 +1,19 @@
 use serde::Serialize;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
 use crate::automation;
 use crate::bridge::{self, AppState, TranslatePayload};
 use crate::config::AppConfig;
+use crate::indicator;
 use crate::selection;
 
 const DEFAULT_POPOVER_SHORTCUT: &str = "Ctrl+Shift+D";
-const DEFAULT_TRANSLATE_SHORTCUT: &str = "Ctrl+Shift+T";
+const DEFAULT_TRANSLATE_SHORTCUT: &str = "Shift";
 const HOTKEY_CAPTURE_SETTLE_MS: u64 = 90;
 const HOTKEY_RETRY_DELAY_MS: u64 = 120;
+const HOTKEY_LOADING_MIN_MS: u64 = 170;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct HotkeyTranslationEvent {
@@ -89,15 +91,7 @@ fn sanitize_translation_text(input: &str) -> String {
         .replace('\r', "")
 }
 
-fn effective_shortcut(shortcut: &str, fallback: &str) -> String {
-    let trimmed = shortcut.trim();
-    if parse_hotkey(trimmed).is_ok() {
-        return trimmed.to_owned();
-    }
-    fallback.to_owned()
-}
-
-pub fn parse_hotkey(shortcut: &str) -> Result<(), String> {
+fn parse_hotkey_with_mode(shortcut: &str, allow_modifier_only: bool) -> Result<(), String> {
     let parts: Vec<&str> = shortcut
         .split('+')
         .map(|part| part.trim())
@@ -124,6 +118,13 @@ pub fn parse_hotkey(shortcut: &str) -> Result<(), String> {
         }
     }
 
+    if key_count == 0 && allow_modifier_only {
+        if parts.len() == 1 && parts[0].eq_ignore_ascii_case("shift") {
+            return Ok(());
+        }
+        return Err("only Shift modifier-only hotkey is supported".to_owned());
+    }
+
     if key_count == 0 {
         return Err("hotkey must include one non-modifier key".to_owned());
     }
@@ -131,11 +132,39 @@ pub fn parse_hotkey(shortcut: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn effective_shortcut(shortcut: &str, fallback: &str, allow_modifier_only: bool) -> String {
+    let trimmed = shortcut.trim();
+    let parsed = if allow_modifier_only {
+        parse_hotkey_with_mode(trimmed, true)
+    } else {
+        parse_hotkey(trimmed)
+    };
+    if parsed.is_ok() {
+        return trimmed.to_owned();
+    }
+    fallback.to_owned()
+}
+
+fn is_modifier_only_shortcut(shortcut: &str) -> bool {
+    let parts: Vec<&str> = shortcut
+        .split('+')
+        .map(|part| part.trim())
+        .filter(|part| !part.is_empty())
+        .collect();
+    !parts.is_empty() && parts.iter().all(|part| is_valid_modifier(part))
+}
+
+pub fn parse_hotkey(shortcut: &str) -> Result<(), String> {
+    parse_hotkey_with_mode(shortcut, false)
+}
+
 pub fn register_hotkeys(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
-    let popover_shortcut = effective_shortcut(&config.popover_shortcut, DEFAULT_POPOVER_SHORTCUT);
+    let popover_shortcut =
+        effective_shortcut(&config.popover_shortcut, DEFAULT_POPOVER_SHORTCUT, false);
     let translate_shortcut = effective_shortcut(
         &config.hotkey_translate_shortcut,
         DEFAULT_TRANSLATE_SHORTCUT,
+        true,
     );
     let manager = app.global_shortcut();
     manager
@@ -145,7 +174,9 @@ pub fn register_hotkeys(app: &AppHandle, config: &AppConfig) -> Result<(), Strin
         .register(popover_shortcut.as_str())
         .map_err(|err| format!("register popover shortcut failed: {err}"))?;
 
-    if normalize_shortcut(&popover_shortcut) != normalize_shortcut(&translate_shortcut) {
+    if !is_modifier_only_shortcut(&translate_shortcut)
+        && normalize_shortcut(&popover_shortcut) != normalize_shortcut(&translate_shortcut)
+    {
         manager
             .register(translate_shortcut.as_str())
             .map_err(|err| format!("register translate shortcut failed: {err}"))?;
@@ -159,10 +190,12 @@ fn resolve_shortcut_action(config: &AppConfig, shortcut: &str) -> Option<HotkeyA
     let popover = normalize_shortcut(&effective_shortcut(
         &config.popover_shortcut,
         DEFAULT_POPOVER_SHORTCUT,
+        false,
     ));
     let translate = normalize_shortcut(&effective_shortcut(
         &config.hotkey_translate_shortcut,
         DEFAULT_TRANSLATE_SHORTCUT,
+        true,
     ));
 
     if popover == translate && incoming == translate {
@@ -197,6 +230,32 @@ pub async fn handle_global_shortcut(app: AppHandle, shortcut: String) -> Result<
             on_translate_replace_triggered(app, config, shortcut).await
         }
     }
+}
+
+pub async fn handle_modifier_shortcut(app: AppHandle) -> Result<(), String> {
+    if selection::is_any_app_window_focused(&app) {
+        return Ok(());
+    }
+
+    let state = app.state::<AppState>();
+    let config = {
+        let guard = state
+            .config
+            .lock()
+            .map_err(|_| "config lock poisoned".to_owned())?;
+        guard.clone()
+    };
+
+    let translate = normalize_shortcut(&effective_shortcut(
+        &config.hotkey_translate_shortcut,
+        DEFAULT_TRANSLATE_SHORTCUT,
+        true,
+    ));
+    if translate != "shift" {
+        return Ok(());
+    }
+
+    on_translate_replace_triggered(app, config, "Shift".to_owned()).await
 }
 
 async fn capture_active_document_text_stable() -> Result<String, String> {
@@ -258,47 +317,70 @@ async fn on_translate_replace_triggered(
     config: AppConfig,
     shortcut: String,
 ) -> Result<(), String> {
-    let state = app.state::<AppState>();
-    let original = capture_active_document_text_stable().await?;
+    let cursor = tauri::async_runtime::spawn_blocking(automation::cursor_position)
+        .await
+        .ok()
+        .flatten();
 
-    let source_text = original.replace('\r', "");
-    if source_text.trim().is_empty() {
-        return Ok(());
+    let _ = indicator::show_hotkey_indicator(&app, cursor);
+    let started_at = Instant::now();
+
+    let result = async {
+        let state = app.state::<AppState>();
+        let original = capture_active_document_text_stable().await?;
+
+        let source_text = original.replace('\r', "");
+        if source_text.trim().is_empty() {
+            return Ok(());
+        }
+
+        let payload = TranslatePayload {
+            text: source_text.clone(),
+            source: config.quick_translate_source_language.clone(),
+            target: config.quick_translate_target_language.clone(),
+        };
+
+        let response = bridge::translate_via_sidecar(&state.client, payload).await?;
+        let translated = sanitize_translation_text(&response.result);
+        if translated.trim().is_empty() {
+            return Ok(());
+        }
+
+        replace_active_document_text_stable(translated.clone()).await?;
+
+        let event = HotkeyTranslationEvent {
+            original: source_text,
+            translated,
+            source: config.quick_translate_source_language,
+            target: config.quick_translate_target_language,
+            shortcut,
+        };
+        app.emit_to("main", "hotkey-translated", event)
+            .map_err(|err| format!("emit hotkey event failed: {err}"))
     }
+    .await;
 
-    let payload = TranslatePayload {
-        text: source_text.clone(),
-        source: config.quick_translate_source_language.clone(),
-        target: config.quick_translate_target_language.clone(),
-    };
-
-    let response = bridge::translate_via_sidecar(&state.client, payload).await?;
-    let translated = sanitize_translation_text(&response.result);
-    if translated.trim().is_empty() {
-        return Ok(());
+    let remaining =
+        Duration::from_millis(HOTKEY_LOADING_MIN_MS).saturating_sub(started_at.elapsed());
+    if !remaining.is_zero() {
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            std::thread::sleep(remaining);
+        })
+        .await;
     }
-
-    replace_active_document_text_stable(translated.clone()).await?;
-
-    let event = HotkeyTranslationEvent {
-        original: source_text,
-        translated,
-        source: config.quick_translate_source_language,
-        target: config.quick_translate_target_language,
-        shortcut,
-    };
-    app.emit_to("main", "hotkey-translated", event)
-        .map_err(|err| format!("emit hotkey event failed: {err}"))
+    let _ = indicator::hide_hotkey_indicator(&app);
+    result
 }
 
 #[cfg(test)]
 mod tests {
-    use super::parse_hotkey;
+    use super::{parse_hotkey, parse_hotkey_with_mode};
 
     #[test]
     fn test_hotkey_parse() {
         assert!(parse_hotkey("Ctrl+Shift+T").is_ok());
         assert!(parse_hotkey("Shift").is_err());
+        assert!(parse_hotkey_with_mode("Shift", true).is_ok());
         assert!(parse_hotkey("invalid").is_err());
     }
 }

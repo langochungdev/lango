@@ -54,7 +54,11 @@ function isValidKeyToken(token: string): boolean {
   return value === "space" || value === "enter" || value === "tab";
 }
 
-function sanitizeShortcut(raw: string, fallback: string): string {
+function sanitizeShortcut(
+  raw: string,
+  fallback: string,
+  allowModifierOnly: boolean,
+): string {
   const parts = raw
     .split("+")
     .map((part) => part.trim())
@@ -79,6 +83,15 @@ function sanitizeShortcut(raw: string, fallback: string): string {
     }
   }
 
+  if (
+    keyCount === 0 &&
+    allowModifierOnly &&
+    parts.length === 1 &&
+    parts[0].toLowerCase() === "shift"
+  ) {
+    return "Shift";
+  }
+
   if (keyCount !== 1) {
     return fallback;
   }
@@ -91,7 +104,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   enable_translate: true,
   enable_audio: true,
   auto_play_audio_mode: "word",
-  popover_trigger_mode: "auto",
+  popover_trigger_mode: "shortcut",
   popover_shortcut: "Ctrl+Shift+D",
   source_language: "en",
   target_language: "vi",
@@ -101,7 +114,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   show_example: true,
   popover_open_panel_mode: "details",
   popover_definition_language_mode: "output",
-  hotkey_translate_shortcut: "Ctrl+Shift+T",
+  hotkey_translate_shortcut: "Shift",
 };
 
 export function sanitizeSettings(partial: Partial<AppSettings>): AppSettings {
@@ -113,15 +126,15 @@ export function sanitizeSettings(partial: Partial<AppSettings>): AppSettings {
   const popoverShortcut = sanitizeShortcut(
     merged.popover_shortcut,
     DEFAULT_SETTINGS.popover_shortcut,
+    false,
   );
   const hotkeyTranslateShortcut = sanitizeShortcut(
     merged.hotkey_translate_shortcut,
     DEFAULT_SETTINGS.hotkey_translate_shortcut,
+    true,
   );
   const audioMode =
     merged.auto_play_audio_mode || DEFAULT_SETTINGS.auto_play_audio_mode;
-  const triggerMode =
-    merged.popover_trigger_mode || DEFAULT_SETTINGS.popover_trigger_mode;
   const panelMode =
     merged.popover_open_panel_mode || DEFAULT_SETTINGS.popover_open_panel_mode;
   const languageMode =
@@ -145,7 +158,7 @@ export function sanitizeSettings(partial: Partial<AppSettings>): AppSettings {
     enable_audio: true,
     show_example: true,
     auto_play_audio_mode: audioMode,
-    popover_trigger_mode: triggerMode,
+    popover_trigger_mode: "shortcut",
     popover_shortcut: popoverShortcut,
     source_language: sourceLanguage,
     target_language: targetLanguage,

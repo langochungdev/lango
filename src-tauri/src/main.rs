@@ -4,6 +4,7 @@ mod automation;
 mod bridge;
 mod config;
 mod hotkey;
+mod indicator;
 mod selection;
 
 use reqwest::Client;

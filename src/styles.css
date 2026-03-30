@@ -25,6 +25,11 @@ body.apl-popover-body {
     background: transparent;
 }
 
+body.apl-hotkey-indicator-body {
+    min-height: auto;
+    background: transparent;
+}
+
 .apl-app-shell {
     max-width: 980px;
     margin: 0 auto;
@@ -132,6 +137,53 @@ button {
 .apl-popover-shell {
     width: 100vw;
     padding: 0.4rem;
+}
+
+.apl-hotkey-indicator-shell {
+    width: 100vw;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.25rem;
+}
+
+.apl-hotkey-indicator {
+    min-width: 148px;
+    border-radius: 999px;
+    border: 1px solid rgba(18, 24, 38, 0.16);
+    background: rgba(255, 255, 255, 0.94);
+    box-shadow: 0 12px 24px rgba(18, 24, 38, 0.2);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.7rem;
+}
+
+.apl-hotkey-indicator-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 999px;
+    border: 2px solid rgba(29, 111, 163, 0.22);
+    border-top-color: #1d6fa3;
+    animation: apl-hotkey-spin 0.7s linear infinite;
+}
+
+.apl-hotkey-indicator-text {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #1f2f49;
+    letter-spacing: 0.01em;
+}
+
+@keyframes apl-hotkey-spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 .apl-popover-shell .apl-popover {

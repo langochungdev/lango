@@ -31,6 +31,21 @@
         "skipTaskbar": true,
         "transparent": true,
         "shadow": false
+      },
+      {
+        "label": "hotkey-indicator",
+        "title": "DictOver Loading",
+        "url": "/?window=hotkey-indicator",
+        "width": 172,
+        "height": 58,
+        "resizable": false,
+        "visible": false,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "transparent": true,
+        "shadow": false,
+        "focus": false
       }
     ],
     "security": {
