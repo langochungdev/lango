@@ -193,7 +193,13 @@ export function Popover({ state, selection, dictionary, translation, error, pane
     void startAudio()
   }, [autoPlayAudioMode, dictionary, enableAudio, selectedText, startAudio, state, stopAudio, translation])
 
-  usePopoverResize(popoverRef, hasSubPanel, activePanel, lockedPopoverWidth)
+  usePopoverResize(
+    popoverRef,
+    hasSubPanel,
+    activePanel,
+    lockedPopoverWidth,
+    selectionAnchor,
+  )
 
   if (state === 'idle') return null
 
@@ -247,7 +253,6 @@ export function Popover({ state, selection, dictionary, translation, error, pane
         popoverRef={popoverRef}
         visible={showDetailsPanel && Boolean(dictionary)}
         panelMode="details"
-        selectionAnchor={selectionAnchor}
       >
         <div className="apl-subpanel-body">
           {dictionary?.meanings.map((meaning, mi) => (
@@ -264,7 +269,6 @@ export function Popover({ state, selection, dictionary, translation, error, pane
         popoverRef={popoverRef}
         visible={showImagePanel}
         panelMode="images"
-        selectionAnchor={selectionAnchor}
       >
         <div className="apl-subpanel-body apl-image-grid">
           {imageLoading && <LoadingDots label="Loading images" />}

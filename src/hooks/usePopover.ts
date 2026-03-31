@@ -23,8 +23,6 @@ const EMPTY_DATA: PopoverData = {
   translation: null,
 };
 
-const AUTO_SELECTION_REPEAT_WINDOW_MS = 850;
-
 function countWords(input: string): number {
   const words = input.trim().split(/\s+/).filter(Boolean);
   return words.length;
@@ -39,10 +37,6 @@ export function usePopover(settings: AppSettings) {
   const [data, setData] = useState<PopoverData>(EMPTY_DATA);
   const [error, setError] = useState<string | null>(null);
   const activeRequestIdRef = useRef(0);
-  const lastAutoSelectionRef = useRef<{ text: string; at: number }>({
-    text: "",
-    at: 0,
-  });
 
   const close = useCallback(() => {
     activeRequestIdRef.current += 1;
@@ -63,18 +57,6 @@ export function usePopover(settings: AppSettings) {
         trigger !== "shortcut"
       ) {
         return;
-      }
-
-      if (trigger === "auto") {
-        const now = Date.now();
-        const repeatedSelection =
-          lastAutoSelectionRef.current.text === selectedText &&
-          now - lastAutoSelectionRef.current.at <
-            AUTO_SELECTION_REPEAT_WINDOW_MS;
-        if (repeatedSelection) {
-          return;
-        }
-        lastAutoSelectionRef.current = { text: selectedText, at: now };
       }
 
       const requestId = activeRequestIdRef.current + 1;

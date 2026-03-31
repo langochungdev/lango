@@ -1,7 +1,7 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use tauri::{AppHandle, Emitter, LogicalSize, Manager, State};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Position, State};
 
 use crate::config::{self, AppConfig};
 use crate::hotkey;
@@ -186,11 +186,12 @@ pub async fn search_images(
 #[tauri::command]
 pub async fn emit_selection_changed(
     app: AppHandle,
+    event_id: Option<u64>,
     text: String,
     trigger: String,
     anchor: Option<selection::SelectionAnchor>,
 ) -> Result<(), String> {
-    selection::emit_selection_changed(&app, text, trigger, anchor)
+    selection::emit_selection_changed(&app, event_id.unwrap_or(0), text, trigger, anchor)
 }
 
 #[tauri::command]
@@ -230,12 +231,36 @@ pub fn show_debug_window(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn resize_popover(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
+pub fn resize_popover(
+    app: AppHandle,
+    width: f64,
+    height: f64,
+    shift_x: Option<f64>,
+    shift_y: Option<f64>,
+) -> Result<(), String> {
     let popover = app
         .get_webview_window("popover")
         .ok_or_else(|| "popover window not found".to_owned())?;
+    let position_before_resize = popover.outer_position().ok();
+
     popover
         .set_size(LogicalSize::new(width, height))
         .map_err(|err| format!("resize popover failed: {err}"))?;
+
+    // Read position again after resizing because some platforms may auto-adjust
+    // window coordinates when size changes near screen edges.
+    let position_after_resize = popover.outer_position().ok();
+
+    let shift_dx = shift_x.unwrap_or(0.0).round() as i32;
+    let shift_dy = shift_y.unwrap_or(0.0).round() as i32;
+    if shift_dx != 0 || shift_dy != 0 {
+        if let Some(pos) = position_after_resize.or(position_before_resize) {
+            let target = PhysicalPosition::new(pos.x - shift_dx, pos.y - shift_dy);
+            popover
+                .set_position(Position::Physical(target))
+                .map_err(|err| format!("shift popover failed: {err}"))?;
+        }
+    }
+
     Ok(())
 }

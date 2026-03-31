@@ -291,6 +291,10 @@ async fn replace_active_document_text_stable(replacement: String) -> Result<(), 
 }
 
 async fn on_popover_triggered(app: AppHandle) -> Result<(), String> {
+    if selection::is_any_app_window_focused(&app) {
+        return Ok(());
+    }
+
     let raw_text = tauri::async_runtime::spawn_blocking(automation::capture_selection_text)
         .await
         .map_err(|err| format!("capture selection task failed: {err}"))??;

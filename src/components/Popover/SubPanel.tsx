@@ -1,19 +1,17 @@
 // Sub-panel hiển thị bên cạnh popover với vị trí tính toán động
 import { useRef } from 'react'
 import { useSubPanelPosition } from '@/hooks/useSubPanelPosition'
-import type { SelectionAnchor } from '@/types/selectionAnchor'
 
 interface SubPanelProps {
   popoverRef: React.RefObject<HTMLElement | null>
   children: React.ReactNode
   visible: boolean
   panelMode: string
-  selectionAnchor: SelectionAnchor | null
 }
 
-export function SubPanel({ popoverRef, children, visible, panelMode, selectionAnchor }: SubPanelProps) {
+export function SubPanel({ popoverRef, children, visible, panelMode }: SubPanelProps) {
   const panelRef = useRef<HTMLElement | null>(null)
-  const pos = useSubPanelPosition(popoverRef, panelRef, visible, selectionAnchor)
+  const pos = useSubPanelPosition(popoverRef, panelRef, visible)
 
   if (!visible) return null
 
@@ -27,7 +25,7 @@ export function SubPanel({ popoverRef, children, visible, panelMode, selectionAn
         left: `${pos.left}px`,
         top: `${pos.top}px`,
         maxHeight: `${pos.maxHeight}px`,
-        zIndex: 10001,
+        zIndex: 9998,
       }}
     >
       {children}

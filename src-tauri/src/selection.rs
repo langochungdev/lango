@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Position};
@@ -28,24 +29,23 @@ struct MouseSelectionState {
     last_release_at: Option<Instant>,
     last_release_x: f64,
     last_release_y: f64,
-    last_selection_rect: Option<ScreenRect>,
-    last_selection_at: Option<Instant>,
 }
 
 static AUTO_SELECTION_STATE: OnceLock<Mutex<AutoSelectionState>> = OnceLock::new();
 static PENDING_SELECTION_EVENT: OnceLock<Mutex<Option<SelectionEvent>>> = OnceLock::new();
 static MODIFIER_HOTKEY_STATE: OnceLock<Mutex<ModifierHotkeyState>> = OnceLock::new();
 static MOUSE_SELECTION_STATE: OnceLock<Mutex<MouseSelectionState>> = OnceLock::new();
+static SELECTION_EVENT_SEQ: OnceLock<AtomicU64> = OnceLock::new();
 
 const SHIFT_TRIGGER_MAX_HOLD_MS: u64 = 700;
 const MOUSE_DRAG_MIN_DISTANCE_PX: f64 = 6.0;
 const DOUBLE_CLICK_MAX_DISTANCE_PX: f64 = 14.0;
 const DOUBLE_CLICK_MAX_INTERVAL_MS: u64 = 360;
-const SELECTION_RECT_STALE_MS: u64 = 1400;
 const POINT_ANCHOR_HALF_WIDTH: i32 = 16;
 const POINT_ANCHOR_HALF_HEIGHT: i32 = 14;
 const POPOVER_BASE_WIDTH: f64 = 360.0;
-const POPOVER_BASE_HEIGHT: f64 = 300.0;
+const POPOVER_BASE_HEIGHT: f64 = 180.0;
+const CURSOR_GAP: i32 = 14;
 
 fn auto_selection_state() -> &'static Mutex<AutoSelectionState> {
     AUTO_SELECTION_STATE.get_or_init(|| {
@@ -82,10 +82,13 @@ fn mouse_selection_state() -> &'static Mutex<MouseSelectionState> {
             last_release_at: None,
             last_release_x: 0.0,
             last_release_y: 0.0,
-            last_selection_rect: None,
-            last_selection_at: None,
         })
     })
+}
+
+fn next_selection_event_id() -> u64 {
+    let seq = SELECTION_EVENT_SEQ.get_or_init(|| AtomicU64::new(1));
+    seq.fetch_add(1, Ordering::Relaxed)
 }
 
 fn to_i32_coord(value: f64) -> i32 {
@@ -164,33 +167,11 @@ fn should_trigger_auto_selection(event: &rdev::Event) -> bool {
                 })
                 .unwrap_or(false);
 
-            let selection_rect = if is_drag_selection {
-                Some(make_rect(
-                    to_i32_coord(guard.press_x),
-                    to_i32_coord(guard.press_y),
-                    to_i32_coord(release_x),
-                    to_i32_coord(release_y),
-                ))
-            } else if is_double_click {
-                let cx = to_i32_coord(release_x);
-                let cy = to_i32_coord(release_y);
-                Some(make_rect(
-                    cx - POINT_ANCHOR_HALF_WIDTH,
-                    cy - POINT_ANCHOR_HALF_HEIGHT,
-                    cx + POINT_ANCHOR_HALF_WIDTH,
-                    cy + POINT_ANCHOR_HALF_HEIGHT,
-                ))
-            } else {
-                None
-            };
-
             guard.left_pressed = false;
             guard.moved = false;
             guard.last_release_at = Some(now);
             guard.last_release_x = release_x;
             guard.last_release_y = release_y;
-            guard.last_selection_rect = selection_rect;
-            guard.last_selection_at = guard.last_selection_rect.map(|_| now);
 
             is_drag_selection || is_double_click
         }
@@ -287,6 +268,7 @@ pub struct SelectionAnchor {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SelectionEvent {
+    pub event_id: u64,
     pub text: String,
     pub trigger: String,
     pub anchor: Option<SelectionAnchor>,
@@ -307,40 +289,36 @@ fn set_pending_selection(event: SelectionEvent) -> Result<(), String> {
     Ok(())
 }
 
-fn resolve_selection_rect() -> Option<ScreenRect> {
-    let Ok(guard) = mouse_selection_state().lock() else {
-        return None;
-    };
-
-    let Some(at) = guard.last_selection_at else {
-        return None;
-    };
-
-    if at.elapsed() > Duration::from_millis(SELECTION_RECT_STALE_MS) {
-        return None;
-    }
-
-    guard.last_selection_rect
-}
-
 fn build_selection_anchor(cursor: Option<(i32, i32)>) -> Option<SelectionAnchor> {
-    let point = cursor.map(|(x, y)| ScreenPoint { x, y });
-    let rect = resolve_selection_rect().or_else(|| {
-        point.as_ref().map(|p| {
-            make_rect(
-                p.x - POINT_ANCHOR_HALF_WIDTH,
-                p.y - POINT_ANCHOR_HALF_HEIGHT,
-                p.x + POINT_ANCHOR_HALF_WIDTH,
-                p.y + POINT_ANCHOR_HALF_HEIGHT,
-            )
-        })
-    });
-
-    if point.is_none() && rect.is_none() {
-        return None;
-    }
-
-    Some(SelectionAnchor { point, rect })
+    let point = if let Some((x, y)) = cursor {
+        ScreenPoint { x, y }
+    } else if let Some((x, y)) = automation::cursor_position() {
+        ScreenPoint { x, y }
+    } else {
+        let Ok(guard) = mouse_selection_state().lock() else {
+            return None;
+        };
+        if guard.last_release_at.is_none()
+            && guard.cursor_x.abs() < f64::EPSILON
+            && guard.cursor_y.abs() < f64::EPSILON
+        {
+            return None;
+        }
+        ScreenPoint {
+            x: to_i32_coord(guard.cursor_x),
+            y: to_i32_coord(guard.cursor_y),
+        }
+    };
+    let rect = make_rect(
+        point.x - POINT_ANCHOR_HALF_WIDTH,
+        point.y - POINT_ANCHOR_HALF_HEIGHT,
+        point.x + POINT_ANCHOR_HALF_WIDTH,
+        point.y + POINT_ANCHOR_HALF_HEIGHT,
+    );
+    Some(SelectionAnchor {
+        point: Some(point),
+        rect: Some(rect),
+    })
 }
 
 pub fn start_selection_listener(app: AppHandle) {
@@ -379,6 +357,11 @@ pub(crate) fn is_any_app_window_focused(app: &AppHandle) -> bool {
             return true;
         }
     }
+    if let Some(debug) = app.get_webview_window("debug-log") {
+        if debug.is_focused().unwrap_or(false) {
+            return true;
+        }
+    }
     false
 }
 
@@ -398,6 +381,11 @@ async fn on_auto_selection(app: AppHandle) -> Result<(), String> {
     if is_any_app_window_focused(&app) {
         return Ok(());
     }
+
+    // Snapshot cursor as early as possible to avoid drift while selection text is captured.
+    let cursor = tauri::async_runtime::spawn_blocking(automation::cursor_position)
+        .await
+        .map_err(|err| format!("capture cursor task failed: {err}"))?;
 
     let raw_text = tauri::async_runtime::spawn_blocking(automation::capture_selection_text)
         .await
@@ -421,10 +409,6 @@ async fn on_auto_selection(app: AppHandle) -> Result<(), String> {
         guard.last_emit = Instant::now();
     }
 
-    let cursor = tauri::async_runtime::spawn_blocking(automation::cursor_position)
-        .await
-        .map_err(|err| format!("capture cursor task failed: {err}"))?;
-
     show_popover_window(&app, selected, "auto".to_owned(), cursor)
 }
 
@@ -435,8 +419,10 @@ pub fn show_popover_window(
     cursor: Option<(i32, i32)>,
 ) -> Result<(), String> {
     let anchor = build_selection_anchor(cursor);
+    let event_id = next_selection_event_id();
 
     set_pending_selection(SelectionEvent {
+        event_id,
         text: text.clone(),
         trigger: trigger.clone(),
         anchor: anchor.clone(),
@@ -458,8 +444,12 @@ pub fn show_popover_window(
     popover
         .show()
         .map_err(|err| format!("show popover window failed: {err}"))?;
+    let reanchored = resolve_popover_position(app, &popover, anchor.as_ref());
+    popover
+        .set_position(Position::Physical(reanchored))
+        .map_err(|err| format!("re-anchor popover position failed: {err}"))?;
     std::thread::sleep(Duration::from_millis(40));
-    emit_selection_changed(app, text, trigger, anchor)
+    emit_selection_changed(app, event_id, text, trigger, anchor)
 }
 
 fn resolve_anchor_rect(anchor: Option<&SelectionAnchor>) -> Option<ScreenRect> {
@@ -473,6 +463,19 @@ fn resolve_anchor_rect(anchor: Option<&SelectionAnchor>) -> Option<ScreenRect> {
                     point.y + POINT_ANCHOR_HALF_HEIGHT,
                 )
             })
+        })
+    })
+}
+
+fn resolve_anchor_point(anchor: Option<&SelectionAnchor>) -> Option<ScreenPoint> {
+    anchor.and_then(|entry| {
+        if let Some(point) = &entry.point {
+            return Some(point.clone());
+        }
+
+        entry.rect.map(|rect| ScreenPoint {
+            x: (rect.left + rect.right) / 2,
+            y: (rect.top + rect.bottom) / 2,
         })
     })
 }
@@ -500,6 +503,29 @@ fn overlap_area(left: i32, top: i32, width: i32, height: i32, avoid: ScreenRect)
     i64::from(overlap_w) * i64::from(overlap_h)
 }
 
+fn edge_distance(left: i32, top: i32, width: i32, height: i32, anchor: ScreenRect) -> i64 {
+    let right = left + width;
+    let bottom = top + height;
+
+    let dx = if right < anchor.left {
+        anchor.left - right
+    } else if anchor.right < left {
+        left - anchor.right
+    } else {
+        0
+    };
+
+    let dy = if bottom < anchor.top {
+        anchor.top - bottom
+    } else if anchor.bottom < top {
+        top - anchor.bottom
+    } else {
+        0
+    };
+
+    i64::from(dx + dy)
+}
+
 fn overflow_total(left: i32, top: i32, min_x: i32, min_y: i32, max_x: i32, max_y: i32) -> i64 {
     let overflow_left = (min_x - left).max(0);
     let overflow_top = (min_y - top).max(0);
@@ -515,6 +541,19 @@ fn anchor_center(anchor_rect: ScreenRect) -> (i32, i32) {
     )
 }
 
+fn center_distance_to_point(
+    left: i32,
+    top: i32,
+    width: i32,
+    height: i32,
+    point_x: i32,
+    point_y: i32,
+) -> i64 {
+    let center_x = left + width / 2;
+    let center_y = top + height / 2;
+    i64::from((center_x - point_x).abs() + (center_y - point_y).abs())
+}
+
 fn resolve_popover_position(
     app: &AppHandle,
     popover: &tauri::WebviewWindow,
@@ -527,18 +566,61 @@ fn resolve_popover_position(
     let width = i32::try_from(window_size.width).unwrap_or(POPOVER_BASE_WIDTH as i32);
     let height = i32::try_from(window_size.height).unwrap_or(POPOVER_BASE_HEIGHT as i32);
 
-    let monitor = popover
-        .current_monitor()
-        .ok()
-        .flatten()
+    let anchor_point = resolve_anchor_point(anchor);
+    let anchor_hint = resolve_anchor_rect(anchor).or_else(|| {
+        anchor_point.as_ref().map(|point| {
+            make_rect(
+                point.x - POINT_ANCHOR_HALF_WIDTH,
+                point.y - POINT_ANCHOR_HALF_HEIGHT,
+                point.x + POINT_ANCHOR_HALF_WIDTH,
+                point.y + POINT_ANCHOR_HALF_HEIGHT,
+            )
+        })
+    });
+
+    let monitor_from_anchor = anchor_point.as_ref().and_then(|point| {
+        popover.available_monitors().ok().and_then(|monitors| {
+            let mut containing = None;
+            let mut nearest = None;
+            let mut nearest_distance = i64::MAX;
+
+            for monitor in monitors {
+                let pos = monitor.position();
+                let size = monitor.size();
+                let left = pos.x;
+                let top = pos.y;
+                let right = left + i32::try_from(size.width).unwrap_or(i32::MAX);
+                let bottom = top + i32::try_from(size.height).unwrap_or(i32::MAX);
+
+                if point.x >= left && point.x <= right && point.y >= top && point.y <= bottom {
+                    containing = Some(monitor);
+                    break;
+                }
+
+                let monitor_cx = left + (right - left) / 2;
+                let monitor_cy = top + (bottom - top) / 2;
+                let distance =
+                    i64::from((point.x - monitor_cx).abs() + (point.y - monitor_cy).abs());
+                if distance < nearest_distance {
+                    nearest_distance = distance;
+                    nearest = Some(monitor);
+                }
+            }
+
+            containing.or(nearest)
+        })
+    });
+
+    let monitor = monitor_from_anchor
+        .or_else(|| popover.current_monitor().ok().flatten())
         .or_else(|| app.primary_monitor().ok().flatten());
 
     let Some(monitor) = monitor else {
         return PhysicalPosition::new(18, 18);
     };
 
-    let margin = 12;
-    let gap = 4;
+    let margin = 8;
+    let gap = 2;
     let monitor_position = monitor.position();
     let monitor_size = monitor.size();
 
@@ -552,7 +634,7 @@ fn resolve_popover_position(
     let max_x = (monitor_right - width - margin).max(min_x);
     let max_y = (monitor_bottom - height - margin).max(min_y);
 
-    let raw_anchor = resolve_anchor_rect(anchor).unwrap_or_else(|| {
+    let raw_anchor = anchor_hint.unwrap_or_else(|| {
         make_rect(
             monitor_left + margin,
             monitor_top + margin,
@@ -568,15 +650,24 @@ fn resolve_popover_position(
         monitor_bottom - margin,
     );
     let (anchor_cx, anchor_cy) = anchor_center(anchor_rect);
+    let cursor_x = anchor_point.as_ref().map_or(anchor_cx, |point| point.x);
+    let cursor_y = anchor_point.as_ref().map_or(anchor_cy, |point| point.y);
 
     let candidates = [
-        (anchor_rect.right + gap, anchor_rect.top),
+        (cursor_x + CURSOR_GAP, cursor_y + CURSOR_GAP),
+        (cursor_x + CURSOR_GAP, cursor_y - height - CURSOR_GAP),
+        (cursor_x - width - CURSOR_GAP, cursor_y + CURSOR_GAP),
+        (
+            cursor_x - width - CURSOR_GAP,
+            cursor_y - height - CURSOR_GAP,
+        ),
+        (cursor_x + CURSOR_GAP, cursor_y - height / 2),
+        (cursor_x - width - CURSOR_GAP, cursor_y - height / 2),
+        (cursor_x - width / 2, cursor_y + CURSOR_GAP),
+        (cursor_x - width / 2, cursor_y - height - CURSOR_GAP),
         (anchor_rect.right + gap, anchor_cy - height / 2),
-        (anchor_rect.left - width - gap, anchor_rect.top),
         (anchor_rect.left - width - gap, anchor_cy - height / 2),
-        (anchor_rect.left, anchor_rect.bottom + gap),
         (anchor_cx - width / 2, anchor_rect.bottom + gap),
-        (anchor_rect.left, anchor_rect.top - height - gap),
         (anchor_cx - width / 2, anchor_rect.top - height - gap),
     ];
 
@@ -589,10 +680,10 @@ fn resolve_popover_position(
         let clamped_top = candidate_top.clamp(min_y, max_y);
         let overlap = overlap_area(clamped_left, clamped_top, width, height, anchor_rect);
         let overflow = overflow_total(candidate_left, candidate_top, min_x, min_y, max_x, max_y);
-        let center_x = clamped_left + width / 2;
-        let center_y = clamped_top + height / 2;
-        let distance = i64::from((center_x - anchor_cx).abs() + (center_y - anchor_cy).abs());
-        let score = overlap * 1000 + overflow * 10000 + distance;
+        let near_anchor = edge_distance(clamped_left, clamped_top, width, height, anchor_rect);
+        let near_cursor =
+            center_distance_to_point(clamped_left, clamped_top, width, height, cursor_x, cursor_y);
+        let score = overflow * 1_000_000 + overlap * 100_000 + near_cursor * 100 + near_anchor;
 
         if score < best_score {
             best_score = score;
@@ -615,11 +706,13 @@ pub fn hide_popover_window(app: &AppHandle) -> Result<(), String> {
 
 pub fn emit_selection_changed(
     app: &AppHandle,
+    event_id: u64,
     text: String,
     trigger: String,
     anchor: Option<SelectionAnchor>,
 ) -> Result<(), String> {
     let payload = SelectionEvent {
+        event_id,
         text,
         trigger,
         anchor,
@@ -628,6 +721,7 @@ pub fn emit_selection_changed(
         .map_err(|err| format!("emit selection event failed: {err}"))
 }
 
+#[allow(dead_code)]
 pub fn reposition_popover_in_monitor(
     app: &AppHandle,
     popover: &tauri::WebviewWindow,

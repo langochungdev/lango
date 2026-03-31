@@ -12,6 +12,7 @@ import type { SelectionAnchor } from '@/types/selectionAnchor'
 import { DEFAULT_SETTINGS, sanitizeSettings, type AppSettings } from '@/types/settings'
 
 interface SelectionEventPayload {
+  event_id?: number
   text: string
   trigger: 'auto' | 'shortcut'
   anchor?: SelectionAnchor | null
@@ -49,6 +50,46 @@ function shortText(value: string, max = 72): string {
     return clean
   }
   return `${clean.slice(0, max)}...`
+}
+
+function anchorSummary(anchor?: SelectionAnchor | null): string {
+  if (!anchor) {
+    return 'anchor=none'
+  }
+
+  if (anchor.rect) {
+    const left = Math.min(anchor.rect.left, anchor.rect.right)
+    const top = Math.min(anchor.rect.top, anchor.rect.bottom)
+    const right = Math.max(anchor.rect.left, anchor.rect.right)
+    const bottom = Math.max(anchor.rect.top, anchor.rect.bottom)
+    return `anchorRect=(${left},${top})-(${right},${bottom})`
+  }
+
+  if (anchor.point) {
+    return `anchorPoint=(${anchor.point.x},${anchor.point.y})`
+  }
+
+  return 'anchor=empty'
+}
+
+function anchorFingerprint(anchor?: SelectionAnchor | null): string {
+  if (!anchor) {
+    return 'none'
+  }
+
+  if (anchor.rect) {
+    const left = Math.min(anchor.rect.left, anchor.rect.right)
+    const top = Math.min(anchor.rect.top, anchor.rect.bottom)
+    const right = Math.max(anchor.rect.left, anchor.rect.right)
+    const bottom = Math.max(anchor.rect.top, anchor.rect.bottom)
+    return `rect:${left}:${top}:${right}:${bottom}`
+  }
+
+  if (anchor.point) {
+    return `point:${anchor.point.x}:${anchor.point.y}`
+  }
+
+  return 'empty'
 }
 
 function changedSettingKeys(previous: AppSettings, next: AppSettings): string[] {
@@ -224,20 +265,61 @@ function PopoverWindow() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [selectionAnchor, setSelectionAnchor] = useState<SelectionAnchor | null>(null)
   const lastLoggedStateRef = useRef<string>('idle')
+  const lastSelectionEventRef = useRef<{ key: string; at: number; eventId: number | null }>({ key: '', at: 0, eventId: null })
   const { state, data, error, close, openFromSelection } = usePopover(settings)
+
+  const processSelectionEvent = useCallback(async (payload: SelectionEventPayload, source: 'pending' | 'event') => {
+    const text = payload.text.trim()
+    if (!text) {
+      return
+    }
+
+    const anchor = payload.anchor ?? null
+    const key = `${payload.trigger}|${text}|${anchorFingerprint(anchor)}`
+    const now = Date.now()
+    const incomingEventId = Number.isFinite(payload.event_id) ? Number(payload.event_id) : null
+    const sameEventId =
+      incomingEventId !== null &&
+      lastSelectionEventRef.current.eventId !== null &&
+      incomingEventId === lastSelectionEventRef.current.eventId
+    const isDuplicate =
+      sameEventId ||
+      (lastSelectionEventRef.current.key === key &&
+        now - lastSelectionEventRef.current.at <= 450)
+
+    if (isDuplicate) {
+      appendDebugLog(
+        'popover',
+        'Skip duplicate selection',
+        `${source} | ${payload.trigger} | "${shortText(text)}" | ${anchorSummary(anchor)}`,
+      )
+      return
+    }
+
+    lastSelectionEventRef.current = {
+      key,
+      at: now,
+      eventId: incomingEventId,
+    }
+    setSelectionAnchor(anchor)
+    appendDebugLog(
+      'popover',
+      source === 'pending' ? 'Consume pending selection' : 'Selection changed',
+      `${payload.trigger} | "${shortText(text)}" | ${anchorSummary(anchor)}`,
+    )
+    await openFromSelection(text, payload.trigger)
+  }, [openFromSelection])
 
   const consumePendingSelection = useCallback(async () => {
     try {
       const pending = await invoke<SelectionEventPayload | null>('take_pending_selection')
-      if (pending?.text.trim()) {
-        setSelectionAnchor(pending.anchor ?? null)
-        appendDebugLog('popover', 'Consume pending selection', `${pending.trigger} | "${shortText(pending.text)}"`)
-        await openFromSelection(pending.text, pending.trigger)
+      if (pending) {
+        await processSelectionEvent(pending, 'pending')
       }
     } catch {
       return
     }
-  }, [openFromSelection])
+  }, [processSelectionEvent])
 
   useEffect(() => {
     let mounted = true
@@ -288,9 +370,7 @@ function PopoverWindow() {
     const setupEvents = async () => {
       try {
         const unlistenSelection = await listen<SelectionEventPayload>('selection-changed', (event) => {
-          setSelectionAnchor(event.payload.anchor ?? null)
-          appendDebugLog('popover', 'Selection changed', `${event.payload.trigger} | "${shortText(event.payload.text)}"`)
-          void openFromSelection(event.payload.text, event.payload.trigger)
+          void processSelectionEvent(event.payload, 'event')
         })
         cleanupSelection = unlistenSelection
       } catch {
@@ -303,7 +383,7 @@ function PopoverWindow() {
     return () => {
       cleanupSelection?.()
     }
-  }, [consumePendingSelection, openFromSelection])
+  }, [consumePendingSelection, processSelectionEvent])
 
   const closePopover = useCallback((reason?: string) => {
     close()

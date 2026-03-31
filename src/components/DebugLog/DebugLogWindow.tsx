@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { DebugLogPopup } from "@/components/DebugLog/DebugLogPopup";
-import { readDebugLogs, type DebugLogEntry } from "@/services/debugLog";
+import {
+  readDebugLogs,
+  subscribeDebugLogUpdates,
+  type DebugLogEntry,
+} from "@/services/debugLog";
 
 export function DebugLogWindow() {
   const [logs, setLogs] = useState<DebugLogEntry[]>(() => readDebugLogs());
@@ -9,9 +13,12 @@ export function DebugLogWindow() {
     const refresh = () => {
       setLogs(readDebugLogs());
     };
-    window.addEventListener("dictover-debug-log-updated", refresh);
+
+    const unsubscribe = subscribeDebugLogUpdates(refresh);
+    refresh();
+
     return () => {
-      window.removeEventListener("dictover-debug-log-updated", refresh);
+      unsubscribe();
     };
   }, []);
 

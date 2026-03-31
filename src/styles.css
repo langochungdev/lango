@@ -167,9 +167,10 @@ button {
 }
 
 .apl-popover-shell {
-    width: 100vw;
-    padding: 0.4rem;
-    overflow-x: hidden;
+    width: fit-content;
+    min-width: 0;
+    padding: 0;
+    overflow: visible;
 }
 
 .apl-hotkey-indicator-shell {
@@ -177,13 +178,6 @@ button {
     min-height: 100vh;
     cursor: wait;
     background: transparent;
-}
-
-.apl-popover-shell .apl-popover {
-    position: static;
-    inset: auto;
-    width: fit-content;
-    max-width: min(560px, calc(100vw - 24px));
 }
 
 .apl-body {
@@ -852,6 +846,33 @@ button {
 .apl-debug-log-actions button {
     padding: 0.3rem 0.56rem;
     font-size: 0.82rem;
+}
+
+.apl-debug-acceptance {
+    border: 1px solid #d7dde9;
+    border-radius: 8px;
+    background: #f8fafc;
+    padding: 0.5rem;
+    display: grid;
+    gap: 0.22rem;
+}
+
+.apl-debug-acceptance p {
+    margin: 0;
+    font-size: 0.82rem;
+    color: #24324a;
+}
+
+.apl-debug-acceptance-status {
+    font-weight: 700;
+}
+
+.apl-debug-acceptance-status.is-pass {
+    color: #0f6a2b;
+}
+
+.apl-debug-acceptance-status.is-fail {
+    color: #a52222;
 }
 
 .apl-debug-log-text {
