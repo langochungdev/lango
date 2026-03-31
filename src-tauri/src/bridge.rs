@@ -231,12 +231,19 @@ pub fn show_debug_window(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+#[allow(non_snake_case)]
 pub fn resize_popover(
     app: AppHandle,
     width: f64,
     height: f64,
     shift_x: Option<f64>,
+    shiftX: Option<f64>,
     shift_y: Option<f64>,
+    shiftY: Option<f64>,
+    target_x: Option<f64>,
+    targetX: Option<f64>,
+    target_y: Option<f64>,
+    targetY: Option<f64>,
     anchor: Option<selection::SelectionAnchor>,
 ) -> Result<(), String> {
     let popover = app
@@ -253,11 +260,34 @@ pub fn resize_popover(
     // window coordinates when size changes near screen edges.
     let position_after_resize = popover.outer_position().ok();
 
-    let shift_dx = shift_x.unwrap_or(0.0).round() as i32;
-    let shift_dy = shift_y.unwrap_or(0.0).round() as i32;
-    if shift_dx != 0 || shift_dy != 0 {
-        if let Some(pos) = position_after_resize.or(position_before_resize) {
-            let target = PhysicalPosition::new(pos.x - shift_dx, pos.y - shift_dy);
+    let resolved_target_x = target_x.or(targetX);
+    let resolved_target_y = target_y.or(targetY);
+    if let (Some(target_x), Some(target_y)) = (resolved_target_x, resolved_target_y) {
+        let scale_factor = popover
+            .scale_factor()
+            .map_err(|err| format!("read popover scale factor failed: {err}"))?;
+        let target = PhysicalPosition::new(
+            (target_x * scale_factor).round() as i32,
+            (target_y * scale_factor).round() as i32,
+        );
+        popover
+            .set_position(Position::Physical(target))
+            .map_err(|err| format!("position popover failed: {err}"))?;
+        return Ok(());
+    }
+
+    let shift_dx = shift_x.or(shiftX).unwrap_or(0.0);
+    let shift_dy = shift_y.or(shiftY).unwrap_or(0.0);
+    let has_explicit_shift = shift_dx.abs() > 0.01 || shift_dy.abs() > 0.01;
+    if has_explicit_shift {
+        if let Some(pos) = position_before_resize.or(position_after_resize) {
+            let scale_factor = popover
+                .scale_factor()
+                .map_err(|err| format!("read popover scale factor failed: {err}"))?;
+            let shift_dx_physical = (shift_dx * scale_factor).round() as i32;
+            let shift_dy_physical = (shift_dy * scale_factor).round() as i32;
+            let target =
+                PhysicalPosition::new(pos.x - shift_dx_physical, pos.y - shift_dy_physical);
             popover
                 .set_position(Position::Physical(target))
                 .map_err(|err| format!("shift popover failed: {err}"))?;
@@ -266,6 +296,12 @@ pub fn resize_popover(
 
     if let Some(anchor_ref) = anchor.as_ref() {
         selection::reanchor_popover_window(&app, Some(anchor_ref))?;
+        return Ok(());
+    }
+
+    // If caller requested an explicit logical shift, keep that result and
+    // skip edge re-pinning to avoid fighting the frontend layout.
+    if has_explicit_shift {
         return Ok(());
     }
 
@@ -322,7 +358,9 @@ pub fn resize_popover(
 
             if target_x != after_pos.x || target_y != after_pos.y {
                 popover
-                    .set_position(Position::Physical(PhysicalPosition::new(target_x, target_y)))
+                    .set_position(Position::Physical(PhysicalPosition::new(
+                        target_x, target_y,
+                    )))
                     .map_err(|err| format!("re-anchor popover after resize failed: {err}"))?;
             }
         }

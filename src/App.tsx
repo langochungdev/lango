@@ -5,9 +5,11 @@ import { Popover } from '@/components/Popover/Popover'
 import { DebugLogWindow } from '@/components/DebugLog/DebugLogWindow'
 import { SettingsPanel } from '@/components/Settings/SettingsPanel'
 import { getSettingsCopy } from '@/constants/settingsI18n'
-import { usePopover } from '@/hooks/usePopover'
+import { usePopover, type PopoverState } from '@/hooks/usePopover'
 import { loadSettings, saveSettings } from '@/services/config'
 import { appendDebugLog } from '@/services/debugLog'
+import type { DictionaryResult } from '@/services/dictionary'
+import type { TranslateResult } from '@/services/translate'
 import type { SelectionAnchor } from '@/types/selectionAnchor'
 import { DEFAULT_SETTINGS, sanitizeSettings, type AppSettings } from '@/types/settings'
 
@@ -39,10 +41,53 @@ type SettingsStatus =
 const WINDOW_MODE =
   typeof window !== 'undefined' &&
   new URLSearchParams(window.location.search).get('window')
+const PREVIEW_MODE =
+  typeof window !== 'undefined' &&
+  new URLSearchParams(window.location.search).get('preview') === '1'
 
 const IS_POPOVER_WINDOW = WINDOW_MODE === 'popover'
 const IS_HOTKEY_INDICATOR_WINDOW = WINDOW_MODE === 'hotkey-indicator'
 const IS_DEBUG_LOG_WINDOW = WINDOW_MODE === 'debug-log'
+const IS_PREVIEW_WINDOW = WINDOW_MODE === 'preview' || PREVIEW_MODE
+
+const MOCK_DICTIONARY: DictionaryResult = {
+  word: 'mindset',
+  phonetic: '/ˈmaɪndset/',
+  audio_url: null,
+  audio_lang: 'en',
+  provider: 'mock',
+  fallback_used: false,
+  meanings: [
+    {
+      part_of_speech: 'noun',
+      definitions: [
+        'A set of attitudes or fixed ideas that affect how someone interprets and responds to situations.',
+        'A mental inclination or habit that strongly influences behavior and decisions.',
+        'A way of thinking that can support growth, resilience, and long-term learning in challenging environments.'
+      ],
+      example: 'A growth mindset helps teams adapt quickly to changing requirements.',
+    },
+    {
+      part_of_speech: 'noun',
+      definitions: [
+        'The established set of assumptions held by an individual or group.',
+        'A person\'s characteristic frame of mind and worldview.'
+      ],
+      example: 'Their collaborative mindset improved product quality significantly.',
+    }
+  ],
+}
+
+const MOCK_TRANSLATION: TranslateResult = {
+  result: 'tu duy\ncach nghi',
+  engine: 'mock-engine',
+  mode: 'direct',
+}
+
+type PreviewTab = 'settings' | 'popover'
+type PreviewScenario = 'lookup' | 'translate' | 'loading' | 'error'
+type PreviewHorizontalEdge = 'left' | 'right'
+type PreviewVerticalEdge = 'top' | 'bottom'
 
 function shortText(value: string, max = 72): string {
   const clean = value.replace(/\s+/g, ' ').trim()
@@ -499,15 +544,151 @@ function HotkeyIndicatorWindow() {
   )
 }
 
+function PreviewWindow() {
+  const [tab, setTab] = useState<PreviewTab>('settings')
+  const [settings, setSettings] = useState<AppSettings>({
+    ...DEFAULT_SETTINGS,
+    popover_open_panel_mode: 'details',
+  })
+  const [scenario, setScenario] = useState<PreviewScenario>('lookup')
+  const [panelMode, setPanelMode] = useState<'none' | 'details'>('details')
+  const [horizontalEdge, setHorizontalEdge] = useState<PreviewHorizontalEdge>('left')
+  const [verticalEdge, setVerticalEdge] = useState<PreviewVerticalEdge>('top')
+
+  const previewState: PopoverState =
+    scenario === 'lookup'
+      ? 'lookup'
+      : scenario === 'translate'
+        ? 'translate'
+        : scenario === 'loading'
+          ? 'loading'
+          : 'error'
+
+  const previewSelection = scenario === 'translate'
+    ? 'Mindset shapes our daily decisions in subtle but meaningful ways.'
+    : 'mindset'
+
+  const previewDictionary = scenario === 'lookup' ? MOCK_DICTIONARY : null
+  const previewTranslation = scenario === 'translate' ? MOCK_TRANSLATION : null
+  const previewError = scenario === 'error' ? 'Mock preview error: service unavailable' : null
+
+  const previewAnchor: SelectionAnchor | null = useMemo(() => {
+    if (typeof window === 'undefined') {
+      return null
+    }
+    const x = horizontalEdge === 'right'
+      ? Math.max(220, window.innerWidth - 160)
+      : 180
+    const y = verticalEdge === 'bottom'
+      ? Math.max(180, window.innerHeight - 120)
+      : 120
+    return { point: { x, y } }
+  }, [horizontalEdge, verticalEdge])
+
+  return (
+    <main className="apl-preview-shell">
+      <header className="apl-preview-header">
+        <h1>UI Preview</h1>
+        <p className="apl-meta">Mock data + real components. Run on browser without Tauri.</p>
+      </header>
+
+      <nav className="apl-preview-tabs" aria-label="Preview tabs">
+        <button
+          type="button"
+          className={`apl-preview-tab${tab === 'settings' ? ' is-active' : ''}`}
+          onClick={() => setTab('settings')}
+        >
+          Settings
+        </button>
+        <button
+          type="button"
+          className={`apl-preview-tab${tab === 'popover' ? ' is-active' : ''}`}
+          onClick={() => setTab('popover')}
+        >
+          Popover + Subpanel Review
+        </button>
+      </nav>
+
+      {tab === 'settings' ? (
+        <section className="apl-preview-pane">
+          <SettingsPanel
+            open
+            settings={settings}
+            onChange={(next) => setSettings(next)}
+          />
+        </section>
+      ) : (
+        <section className="apl-preview-pane">
+          <div className="apl-preview-toolbar">
+            <label className="apl-preview-control">
+              <span>Scenario</span>
+              <select value={scenario} onChange={(event) => setScenario(event.target.value as PreviewScenario)}>
+                <option value="lookup">Lookup</option>
+                <option value="translate">Translate</option>
+                <option value="loading">Loading</option>
+                <option value="error">Error</option>
+              </select>
+            </label>
+
+            <label className="apl-preview-control">
+              <span>Subpanel</span>
+              <select value={panelMode} onChange={(event) => setPanelMode(event.target.value as 'none' | 'details')}>
+                <option value="details">Details</option>
+                <option value="none">None</option>
+              </select>
+            </label>
+
+            <label className="apl-preview-control">
+              <span>Horizontal edge</span>
+              <select value={horizontalEdge} onChange={(event) => setHorizontalEdge(event.target.value as PreviewHorizontalEdge)}>
+                <option value="left">Left</option>
+                <option value="right">Right</option>
+              </select>
+            </label>
+
+            <label className="apl-preview-control">
+              <span>Vertical edge</span>
+              <select value={verticalEdge} onChange={(event) => setVerticalEdge(event.target.value as PreviewVerticalEdge)}>
+                <option value="top">Top</option>
+                <option value="bottom">Bottom</option>
+              </select>
+            </label>
+          </div>
+
+          <div className={`apl-preview-stage apl-preview-stage--h-${horizontalEdge} apl-preview-stage--v-${verticalEdge}`}>
+            <div className="apl-preview-anchor">
+              <main className="apl-popover-shell apl-popover-shell--preview">
+                <Popover
+                  state={previewState}
+                  selection={previewSelection}
+                  dictionary={previewDictionary}
+                  translation={previewTranslation}
+                  error={previewError}
+                  panelMode={panelMode}
+                  enableAudio={settings.enable_audio}
+                  autoPlayAudioMode={settings.auto_play_audio_mode}
+                  selectionAnchor={previewAnchor}
+                />
+              </main>
+            </div>
+          </div>
+        </section>
+      )}
+    </main>
+  )
+}
+
 export function App() {
   useEffect(() => {
     document.body.classList.toggle('apl-popover-body', IS_POPOVER_WINDOW)
     document.body.classList.toggle('apl-hotkey-indicator-body', IS_HOTKEY_INDICATOR_WINDOW)
     document.body.classList.toggle('apl-debug-body', IS_DEBUG_LOG_WINDOW)
+    document.body.classList.toggle('apl-preview-body', IS_PREVIEW_WINDOW)
     return () => {
       document.body.classList.remove('apl-popover-body')
       document.body.classList.remove('apl-hotkey-indicator-body')
       document.body.classList.remove('apl-debug-body')
+      document.body.classList.remove('apl-preview-body')
     }
   }, [])
 
@@ -521,6 +702,10 @@ export function App() {
 
   if (IS_DEBUG_LOG_WINDOW) {
     return <DebugLogWindow />
+  }
+
+  if (IS_PREVIEW_WINDOW) {
+    return <PreviewWindow />
   }
 
   return <SettingsWindow />

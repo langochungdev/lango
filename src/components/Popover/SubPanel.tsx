@@ -1,5 +1,6 @@
 // Sub-panel hiển thị bên cạnh popover với vị trí tính toán động
 import { useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useSubPanelPosition } from '@/hooks/useSubPanelPosition'
 
 interface SubPanelProps {
@@ -12,10 +13,11 @@ interface SubPanelProps {
 export function SubPanel({ popoverRef, children, visible, panelMode }: SubPanelProps) {
   const panelRef = useRef<HTMLElement | null>(null)
   const pos = useSubPanelPosition(popoverRef, panelRef, visible)
+  const portalTarget = typeof document !== 'undefined' ? document.body : null
 
-  if (!visible) return null
+  if (!visible || !portalTarget) return null
 
-  return (
+  return createPortal(
     <aside
       ref={panelRef}
       className="apl-subpanel"
@@ -29,6 +31,7 @@ export function SubPanel({ popoverRef, children, visible, panelMode }: SubPanelP
       }}
     >
       {children}
-    </aside>
+    </aside>,
+    portalTarget,
   )
 }

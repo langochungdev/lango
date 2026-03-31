@@ -15,7 +15,7 @@ const HIDDEN_POSITION: PanelPosition = {
 
 function readDatasetNumber(
   el: HTMLElement,
-  key: "subpanelLeft" | "subpanelTop",
+  key: "subpanelLeft" | "subpanelTop" | "subpanelMaxHeight",
 ): number | null {
   const raw = el.dataset[key];
   if (raw === undefined) {
@@ -42,12 +42,16 @@ export function useSubPanelPosition(
 
     const left = readDatasetNumber(popover, "subpanelLeft");
     const top = readDatasetNumber(popover, "subpanelTop");
+    const datasetMaxHeight = readDatasetNumber(popover, "subpanelMaxHeight");
     if (left === null || top === null) {
       setPosition(HIDDEN_POSITION);
       return;
     }
 
-    const maxHeight = Math.max(120, window.innerHeight - top - MARGIN);
+    const fallbackMaxHeight = Math.max(1, window.innerHeight - top - MARGIN);
+    const maxHeight = datasetMaxHeight
+      ? Math.max(1, datasetMaxHeight)
+      : fallbackMaxHeight;
     setPosition({
       left,
       top,
@@ -92,7 +96,11 @@ export function useSubPanelPosition(
     if (observer && popover) {
       observer.observe(popover, {
         attributes: true,
-        attributeFilter: ["data-subpanel-left", "data-subpanel-top"],
+        attributeFilter: [
+          "data-subpanel-left",
+          "data-subpanel-top",
+          "data-subpanel-max-height",
+        ],
       });
     }
 

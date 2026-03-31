@@ -4,7 +4,7 @@ import type { SelectionAnchor } from "@/types/selectionAnchor";
 
 type ScreenWithOffsets = Screen & { availLeft?: number; availTop?: number };
 type WindowWithOffsets = Window & { screenLeft?: number; screenTop?: number };
-type SubPanelSide = "right" | "left" | "bottom" | "top";
+type SubPanelSide = "right" | "left";
 
 interface RectLike {
   left: number;
@@ -30,9 +30,37 @@ const SUBPANEL_IMAGE_HEIGHT = 360;
 const BASE_INSET_X = 4;
 const BASE_INSET_Y = 4;
 const GAP = 8;
-const WINDOW_PADDING_X = 24;
+const WINDOW_PADDING_X = 0;
 const WINDOW_PADDING_Y = 32;
 const SETTLE_FRAMES = 6;
+
+function hasTauriBridge(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+function buildResizeArgs(params: {
+  width: number;
+  height: number;
+  shiftX?: number;
+  shiftY?: number;
+  targetX?: number;
+  targetY?: number;
+  anchor: SelectionAnchor | null;
+}) {
+  return {
+    width: params.width,
+    height: params.height,
+    shift_x: params.shiftX,
+    shift_y: params.shiftY,
+    shiftX: params.shiftX,
+    shiftY: params.shiftY,
+    target_x: params.targetX,
+    target_y: params.targetY,
+    targetX: params.targetX,
+    targetY: params.targetY,
+    anchor: params.anchor,
+  };
+}
 
 function toRect(
   left: number,
@@ -41,35 +69,6 @@ function toRect(
   height: number,
 ): RectLike {
   return { left, top, right: left + width, bottom: top + height };
-}
-
-function overlapArea(a: RectLike, b: RectLike): number {
-  const overlapW = Math.max(
-    0,
-    Math.min(a.right, b.right) - Math.max(a.left, b.left),
-  );
-  const overlapH = Math.max(
-    0,
-    Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top),
-  );
-  return overlapW * overlapH;
-}
-
-function centerDistance(a: RectLike, b: RectLike): number {
-  const ax = (a.left + a.right) / 2;
-  const ay = (a.top + a.bottom) / 2;
-  const bx = (b.left + b.right) / 2;
-  const by = (b.top + b.bottom) / 2;
-  return Math.abs(ax - bx) + Math.abs(ay - by);
-}
-
-function overflowAgainstBounds(rect: RectLike, bounds: ScreenBounds): number {
-  return (
-    Math.max(0, bounds.left - rect.left) +
-    Math.max(0, bounds.top - rect.top) +
-    Math.max(0, rect.right - bounds.right) +
-    Math.max(0, rect.bottom - bounds.bottom)
-  );
 }
 
 function getWindowOffset(): { x: number; y: number } {
@@ -89,24 +88,6 @@ function getScreenBounds(): ScreenBounds {
     screen.availHeight ?? screen.height ?? window.innerHeight,
   );
   return { left, top, right: left + width, bottom: top + height };
-}
-
-function toSelectionRect(anchor: SelectionAnchor | null): RectLike | null {
-  if (!anchor) {
-    return null;
-  }
-  if (anchor.rect) {
-    return {
-      left: Math.min(anchor.rect.left, anchor.rect.right),
-      top: Math.min(anchor.rect.top, anchor.rect.bottom),
-      right: Math.max(anchor.rect.left, anchor.rect.right),
-      bottom: Math.max(anchor.rect.top, anchor.rect.bottom),
-    };
-  }
-  if (anchor.point) {
-    return toRect(anchor.point.x - 16, anchor.point.y - 14, 32, 28);
-  }
-  return null;
 }
 
 function getAnchorKey(anchor: SelectionAnchor | null): string {
@@ -156,36 +137,19 @@ function buildPanelRectForSide(
   popoverRect: RectLike,
   panelWidth: number,
   panelHeight: number,
+  panelTop: number,
 ): RectLike {
-  const popoverWidth = popoverRect.right - popoverRect.left;
-  const popoverHeight = popoverRect.bottom - popoverRect.top;
   if (side === "left") {
     return toRect(
       popoverRect.left - panelWidth - GAP,
-      popoverRect.top + (popoverHeight - panelHeight) / 2,
-      panelWidth,
-      panelHeight,
-    );
-  }
-  if (side === "top") {
-    return toRect(
-      popoverRect.left + (popoverWidth - panelWidth) / 2,
-      popoverRect.top - panelHeight - GAP,
-      panelWidth,
-      panelHeight,
-    );
-  }
-  if (side === "bottom") {
-    return toRect(
-      popoverRect.left + (popoverWidth - panelWidth) / 2,
-      popoverRect.bottom + GAP,
+      panelTop,
       panelWidth,
       panelHeight,
     );
   }
   return toRect(
     popoverRect.right + GAP,
-    popoverRect.top + (popoverHeight - panelHeight) / 2,
+    panelTop,
     panelWidth,
     panelHeight,
   );
@@ -193,42 +157,11 @@ function buildPanelRectForSide(
 
 function chooseSubPanelSide(
   popoverRect: RectLike,
-  panelWidth: number,
-  panelHeight: number,
   bounds: ScreenBounds,
-  selectionRect: RectLike | null,
 ): SubPanelSide {
-  const sides: SubPanelSide[] = ["right", "left", "bottom", "top"];
-  let bestSide: SubPanelSide = "right";
-  let bestScore = Number.POSITIVE_INFINITY;
-
-  for (const side of sides) {
-    const panelRect = buildPanelRectForSide(
-      side,
-      popoverRect,
-      panelWidth,
-      panelHeight,
-    );
-    const overflow = overflowAgainstBounds(panelRect, bounds);
-    const overlapWithPopover = overlapArea(panelRect, popoverRect);
-    const overlapWithSelection = selectionRect
-      ? overlapArea(panelRect, selectionRect)
-      : 0;
-    const primaryDistance = selectionRect
-      ? centerDistance(panelRect, selectionRect)
-      : centerDistance(panelRect, popoverRect);
-    const score =
-      overflow * 1_000_000_000 +
-      overlapWithPopover * 1_000_000 +
-      overlapWithSelection * 10_000 +
-      primaryDistance;
-    if (score < bestScore) {
-      bestScore = score;
-      bestSide = side;
-    }
-  }
-
-  return bestSide;
+  const popoverCenterX = (popoverRect.left + popoverRect.right) / 2;
+  const screenCenterX = (bounds.left + bounds.right) / 2;
+  return popoverCenterX >= screenCenterX ? "left" : "right";
 }
 
 export function usePopoverResize(
@@ -243,18 +176,27 @@ export function usePopoverResize(
   const resizedRef = useRef(false);
   const lastWindowSizeRef = useRef({ width: BASE_WIDTH, height: BASE_HEIGHT });
   const lastAnchorKeyRef = useRef("none");
+  const stableScreenPopoverRef = useRef<{ x: number; y: number } | null>(null);
+  const previewWindowOffsetRef = useRef({ x: 0, y: 0 });
   const rafRef = useRef(0);
 
   useEffect(() => {
+    const canInvoke = hasTauriBridge();
+
     const anchorKey = getAnchorKey(selectionAnchor);
     if (anchorKey !== lastAnchorKeyRef.current) {
       insetRef.current = { x: BASE_INSET_X, y: BASE_INSET_Y };
       resizedRef.current = false;
+      stableScreenPopoverRef.current = null;
+      previewWindowOffsetRef.current = { x: 0, y: 0 };
       lastAnchorKeyRef.current = anchorKey;
     }
 
     const runLayout = () => {
       const popover = popoverRef.current;
+      const previewShell = popover?.closest(".apl-popover-shell--preview");
+      const previewWindow =
+        previewShell instanceof HTMLElement ? previewShell : null;
       const previousInset = insetRef.current;
       let insetX = BASE_INSET_X;
       let insetY = BASE_INSET_Y;
@@ -262,6 +204,8 @@ export function usePopoverResize(
       if (!hasSubPanel) {
         if (!popover) {
           insetRef.current = { x: insetX, y: insetY };
+          stableScreenPopoverRef.current = null;
+          previewWindowOffsetRef.current = { x: 0, y: 0 };
           return;
         }
 
@@ -272,6 +216,15 @@ export function usePopoverResize(
         popover.dataset.subpanelSide = "right";
         delete popover.dataset.subpanelLeft;
         delete popover.dataset.subpanelTop;
+        delete popover.dataset.subpanelMaxHeight;
+        stableScreenPopoverRef.current = null;
+        previewWindowOffsetRef.current = { x: 0, y: 0 };
+
+        if (!canInvoke && previewWindow) {
+          previewWindow.style.removeProperty("width");
+          previewWindow.style.removeProperty("height");
+          previewWindow.style.removeProperty("transform");
+        }
 
         const measuredRect = popover.getBoundingClientRect();
         const measuredWidth = Math.max(popover.offsetWidth, measuredRect.width);
@@ -300,13 +253,18 @@ export function usePopoverResize(
             width: targetWidth,
             height: targetHeight,
           };
-          void invoke("resize_popover", {
-            width: targetWidth,
-            height: targetHeight,
-            shift_x: shiftX,
-            shift_y: shiftY,
-            anchor: selectionAnchor,
-          });
+          if (canInvoke) {
+            void invoke(
+              "resize_popover",
+              buildResizeArgs({
+                width: targetWidth,
+                height: targetHeight,
+                shiftX,
+                shiftY,
+                anchor: selectionAnchor,
+              }),
+            );
+          }
         }
         insetRef.current = { x: insetX, y: insetY };
         return;
@@ -334,57 +292,56 @@ export function usePopoverResize(
             popoverWidth,
             popoverHeight,
           );
-      const selectionRect = toSelectionRect(selectionAnchor);
-      const side = chooseSubPanelSide(
-        screenPopoverRect,
-        panelSize.width,
-        panelSize.height,
-        screenBounds,
-        selectionRect,
-      );
-
-      if (side === "left") {
-        insetX += panelSize.width + GAP;
+      if (!stableScreenPopoverRef.current) {
+        stableScreenPopoverRef.current = {
+          x: screenPopoverRect.left,
+          y: screenPopoverRect.top,
+        };
       }
-      if (side === "top") {
-        insetY += panelSize.height + GAP;
-      }
+      const stableScreenPopover = stableScreenPopoverRef.current;
+      const side = chooseSubPanelSide(screenPopoverRect, screenBounds);
 
-      let localPopoverRect = toRect(
+      insetY = BASE_INSET_Y;
+      insetX =
+        side === "left"
+          ? BASE_INSET_X + panelSize.width + GAP
+          : BASE_INSET_X;
+
+      const localPopoverRect = toRect(
         insetX,
         insetY,
         popoverWidth,
         popoverHeight,
       );
+
+      const preferredPanelTop =
+        localPopoverRect.top + (popoverHeight - panelSize.height) / 2;
+      const panelTop = Math.max(BASE_INSET_Y, preferredPanelTop);
+
       let localPanelRect = buildPanelRectForSide(
         side,
         localPopoverRect,
         panelSize.width,
         panelSize.height,
+        panelTop,
       );
 
-      if (localPanelRect.left < BASE_INSET_X) {
-        const delta = BASE_INSET_X - localPanelRect.left;
-        insetX += delta;
-        localPopoverRect = toRect(insetX, insetY, popoverWidth, popoverHeight);
-        localPanelRect = buildPanelRectForSide(
-          side,
-          localPopoverRect,
-          panelSize.width,
-          panelSize.height,
-        );
-      }
-      if (localPanelRect.top < BASE_INSET_Y) {
-        const delta = BASE_INSET_Y - localPanelRect.top;
-        insetY += delta;
-        localPopoverRect = toRect(insetX, insetY, popoverWidth, popoverHeight);
-        localPanelRect = buildPanelRectForSide(
-          side,
-          localPopoverRect,
-          panelSize.width,
-          panelSize.height,
-        );
-      }
+      const windowTopOnScreen = screenPopoverRect.top - insetY;
+      const maxWindowHeight = Math.max(
+        BASE_HEIGHT,
+        Math.floor(screenBounds.bottom - windowTopOnScreen - BASE_INSET_Y),
+      );
+      const maxPanelHeight = Math.max(
+        1,
+        Math.floor(maxWindowHeight - localPanelRect.top - WINDOW_PADDING_Y),
+      );
+      const effectivePanelHeight = Math.min(panelSize.height, maxPanelHeight);
+      localPanelRect = toRect(
+        localPanelRect.left,
+        localPanelRect.top,
+        localPanelRect.right - localPanelRect.left,
+        effectivePanelHeight,
+      );
 
       if (popover) {
         popover.style.width = `${popoverWidth}px`;
@@ -394,6 +351,7 @@ export function usePopoverResize(
         popover.dataset.subpanelSide = side;
         popover.dataset.subpanelLeft = `${Math.round(localPanelRect.left)}`;
         popover.dataset.subpanelTop = `${Math.round(localPanelRect.top)}`;
+        popover.dataset.subpanelMaxHeight = `${Math.round(effectivePanelHeight)}`;
       }
 
       const contentWidth =
@@ -402,22 +360,62 @@ export function usePopoverResize(
       const contentHeight =
         Math.max(localPopoverRect.bottom, localPanelRect.bottom) +
         WINDOW_PADDING_Y;
-      const shiftX = insetX - previousInset.x;
-      const shiftY = insetY - previousInset.y;
+      const projectedScreenPopoverLeft = canInvoke
+        ? offset.x + insetX
+        : screenPopoverRect.left + (insetX - previousInset.x);
+      const projectedScreenPopoverTop = canInvoke
+        ? offset.y + insetY
+        : screenPopoverRect.top + (insetY - previousInset.y);
+      const shiftX = projectedScreenPopoverLeft - stableScreenPopover.x;
+      const shiftY = projectedScreenPopoverTop - stableScreenPopover.y;
+      const targetWindowX = stableScreenPopover.x - insetX;
+      const targetWindowY = stableScreenPopover.y - insetY;
+
+      const nextWindowWidth = Math.max(
+        BASE_WIDTH,
+        Math.ceil(contentWidth),
+      );
+      const nextWindowHeight = Math.max(
+        BASE_HEIGHT,
+        Math.min(Math.ceil(contentHeight), maxWindowHeight),
+      );
+      const sizeChanged =
+        nextWindowWidth !== lastWindowSizeRef.current.width ||
+        nextWindowHeight !== lastWindowSizeRef.current.height;
+      const hadResized = resizedRef.current;
 
       resizedRef.current = true;
       insetRef.current = { x: insetX, y: insetY };
       lastWindowSizeRef.current = {
-        width: Math.max(BASE_WIDTH, Math.ceil(contentWidth)),
-        height: Math.max(BASE_HEIGHT, Math.ceil(contentHeight)),
+        width: nextWindowWidth,
+        height: nextWindowHeight,
       };
-      void invoke("resize_popover", {
-        width: lastWindowSizeRef.current.width,
-        height: lastWindowSizeRef.current.height,
-        shift_x: shiftX,
-        shift_y: shiftY,
-        anchor: null,
-      });
+      if (!hadResized || sizeChanged || Math.abs(shiftX) > 0.5 || Math.abs(shiftY) > 0.5) {
+        if (canInvoke) {
+          void invoke(
+            "resize_popover",
+            buildResizeArgs({
+              width: nextWindowWidth,
+              height: nextWindowHeight,
+              shiftX,
+              shiftY,
+              targetX: targetWindowX,
+              targetY: targetWindowY,
+              anchor: null,
+            }),
+          );
+        } else if (previewWindow) {
+          const nextOffsetX = previewWindowOffsetRef.current.x - shiftX;
+          const nextOffsetY = previewWindowOffsetRef.current.y - shiftY;
+          previewWindowOffsetRef.current = {
+            x: nextOffsetX,
+            y: nextOffsetY,
+          };
+          previewWindow.style.width = `${nextWindowWidth}px`;
+          previewWindow.style.height = `${nextWindowHeight}px`;
+          previewWindow.style.transform = `translate(${Math.round(nextOffsetX)}px, ${Math.round(nextOffsetY)}px)`;
+        }
+      }
     };
 
     runLayout();
