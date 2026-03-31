@@ -237,10 +237,12 @@ pub fn resize_popover(
     height: f64,
     shift_x: Option<f64>,
     shift_y: Option<f64>,
+    anchor: Option<selection::SelectionAnchor>,
 ) -> Result<(), String> {
     let popover = app
         .get_webview_window("popover")
         .ok_or_else(|| "popover window not found".to_owned())?;
+    let size_before_resize = popover.outer_size().ok();
     let position_before_resize = popover.outer_position().ok();
 
     popover
@@ -259,6 +261,70 @@ pub fn resize_popover(
             popover
                 .set_position(Position::Physical(target))
                 .map_err(|err| format!("shift popover failed: {err}"))?;
+        }
+    }
+
+    if let Some(anchor_ref) = anchor.as_ref() {
+        selection::reanchor_popover_window(&app, Some(anchor_ref))?;
+        return Ok(());
+    }
+
+    let monitor = popover
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| app.primary_monitor().ok().flatten());
+
+    if let (Some(monitor), Some(before_pos), Some(before_size), Some(after_pos), Some(after_size)) = (
+        monitor,
+        position_before_resize,
+        size_before_resize,
+        popover.outer_position().ok(),
+        popover.outer_size().ok(),
+    ) {
+        let margin = 8;
+        let monitor_pos = monitor.position();
+        let monitor_size = monitor.size();
+        let monitor_left = monitor_pos.x;
+        let monitor_top = monitor_pos.y;
+        let monitor_right = monitor_left + i32::try_from(monitor_size.width).unwrap_or(i32::MAX);
+        let monitor_bottom = monitor_top + i32::try_from(monitor_size.height).unwrap_or(i32::MAX);
+
+        let before_w = i32::try_from(before_size.width).unwrap_or(0);
+        let before_h = i32::try_from(before_size.height).unwrap_or(0);
+        let after_w = i32::try_from(after_size.width).unwrap_or(0);
+        let after_h = i32::try_from(after_size.height).unwrap_or(0);
+
+        let right_edge_before = before_pos.x + before_w;
+        let bottom_edge_before = before_pos.y + before_h;
+
+        let pinned_right = (monitor_right - margin - right_edge_before).abs() <= 2;
+        let pinned_bottom = (monitor_bottom - margin - bottom_edge_before).abs() <= 2;
+
+        if pinned_right || pinned_bottom {
+            let min_x = monitor_left + margin;
+            let min_y = monitor_top + margin;
+            let max_x = (monitor_right - after_w - margin).max(min_x);
+            let max_y = (monitor_bottom - after_h - margin).max(min_y);
+
+            let mut target_x = after_pos.x;
+            let mut target_y = after_pos.y;
+
+            if pinned_right {
+                target_x = monitor_right - after_w - margin;
+            }
+            if pinned_bottom {
+                target_y = monitor_bottom - after_h - margin;
+            }
+
+            target_x = target_x.clamp(min_x, max_x);
+            target_y = target_y.clamp(min_y, max_y);
+
+            if target_x != after_pos.x || target_y != after_pos.y {
+                popover
+                    .set_position(Position::Physical(PhysicalPosition::new(target_x, target_y)))
+                    .map_err(|err| format!("re-anchor popover after resize failed: {err}"))?;
+            }
         }
     }
 

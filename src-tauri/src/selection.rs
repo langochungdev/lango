@@ -695,6 +695,20 @@ fn resolve_popover_position(
     PhysicalPosition::new(best_left, best_top)
 }
 
+pub fn reanchor_popover_window(
+    app: &AppHandle,
+    anchor: Option<&SelectionAnchor>,
+) -> Result<(), String> {
+    let popover = app
+        .get_webview_window("popover")
+        .ok_or_else(|| "popover window not found".to_owned())?;
+    let target = resolve_popover_position(app, &popover, anchor);
+    popover
+        .set_position(Position::Physical(target))
+        .map_err(|err| format!("re-anchor popover failed: {err}"))?;
+    Ok(())
+}
+
 pub fn hide_popover_window(app: &AppHandle) -> Result<(), String> {
     if let Some(popover) = app.get_webview_window("popover") {
         popover

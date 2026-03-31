@@ -195,6 +195,7 @@ export function Popover({ state, selection, dictionary, translation, error, pane
 
   usePopoverResize(
     popoverRef,
+    state,
     hasSubPanel,
     activePanel,
     lockedPopoverWidth,

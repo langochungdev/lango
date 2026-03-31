@@ -22,12 +22,13 @@ interface ScreenBounds {
 
 const BASE_WIDTH = 360;
 const BASE_HEIGHT = 180;
+const MIN_POPOVER_WIDTH = 320;
 const SUBPANEL_DETAIL_WIDTH = 440;
 const SUBPANEL_IMAGE_WIDTH = 520;
 const SUBPANEL_DETAIL_HEIGHT = 300;
 const SUBPANEL_IMAGE_HEIGHT = 360;
-const BASE_INSET_X = 12;
-const BASE_INSET_Y = 12;
+const BASE_INSET_X = 4;
+const BASE_INSET_Y = 4;
 const GAP = 8;
 const WINDOW_PADDING_X = 24;
 const WINDOW_PADDING_Y = 32;
@@ -232,6 +233,7 @@ function chooseSubPanelSide(
 
 export function usePopoverResize(
   popoverRef: React.RefObject<HTMLElement | null>,
+  popoverState: string,
   hasSubPanel: boolean,
   panelMode: string,
   lockedPopoverWidth: number | null,
@@ -258,22 +260,29 @@ export function usePopoverResize(
       let insetY = BASE_INSET_Y;
 
       if (!hasSubPanel) {
-        if (popover) {
-          popover.style.removeProperty("width");
-          popover.style.removeProperty("max-width");
-          popover.style.left = `${BASE_INSET_X}px`;
-          popover.style.top = `${BASE_INSET_Y}px`;
-          popover.dataset.subpanelSide = "right";
-          delete popover.dataset.subpanelLeft;
-          delete popover.dataset.subpanelTop;
+        if (!popover) {
+          insetRef.current = { x: insetX, y: insetY };
+          return;
         }
+
+        popover.style.removeProperty("width");
+        popover.style.removeProperty("max-width");
+        popover.style.left = `${BASE_INSET_X}px`;
+        popover.style.top = `${BASE_INSET_Y}px`;
+        popover.dataset.subpanelSide = "right";
+        delete popover.dataset.subpanelLeft;
+        delete popover.dataset.subpanelTop;
+
+        const measuredRect = popover.getBoundingClientRect();
+        const measuredWidth = Math.max(popover.offsetWidth, measuredRect.width);
+        const measuredHeight = Math.max(popover.offsetHeight, measuredRect.height);
         const targetWidth = Math.max(
-          120,
-          Math.ceil((popover?.offsetWidth ?? BASE_WIDTH) + BASE_INSET_X * 2),
+          MIN_POPOVER_WIDTH,
+          Math.ceil(measuredWidth + BASE_INSET_X * 2),
         );
         const targetHeight = Math.max(
-          80,
-          Math.ceil((popover?.offsetHeight ?? BASE_HEIGHT) + BASE_INSET_Y * 2),
+          1,
+          Math.ceil(measuredHeight + BASE_INSET_Y * 2),
         );
         const sizeChanged =
           targetWidth !== lastWindowSizeRef.current.width ||
@@ -296,6 +305,7 @@ export function usePopoverResize(
             height: targetHeight,
             shift_x: shiftX,
             shift_y: shiftY,
+            anchor: selectionAnchor,
           });
         }
         insetRef.current = { x: insetX, y: insetY };
@@ -406,6 +416,7 @@ export function usePopoverResize(
         height: lastWindowSizeRef.current.height,
         shift_x: shiftX,
         shift_y: shiftY,
+        anchor: null,
       });
     };
 
@@ -431,5 +442,12 @@ export function usePopoverResize(
     return () => {
       cancelAnimationFrame(rafRef.current);
     };
-  }, [hasSubPanel, lockedPopoverWidth, panelMode, popoverRef, selectionAnchor]);
+  }, [
+    hasSubPanel,
+    lockedPopoverWidth,
+    panelMode,
+    popoverRef,
+    popoverState,
+    selectionAnchor,
+  ]);
 }
