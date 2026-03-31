@@ -7,7 +7,7 @@ import type { PopoverState } from '@/hooks/usePopover'
 import type { AutoPlayAudioMode, PopoverOpenPanelMode } from '@/types/settings'
 import type { DictionaryResult } from '@/services/dictionary'
 import type { TranslateResult } from '@/services/translate'
-import { normalizeText, sanitizeMarkup, lookupPrimary, resolveImageQuery, buildAlternativeAudioUrl } from '@/components/Popover/popover.utils'
+import { normalizeText, sanitizeMarkup, normalizePhonetic, lookupPrimary, resolveImageQuery, buildAlternativeAudioUrl } from '@/components/Popover/popover.utils'
 import { AudioIcon, ImageIcon, SettingsIcon } from '@/components/Popover/PopoverIcons'
 import { SubPanel } from '@/components/Popover/SubPanel'
 import { usePopoverResize } from '@/hooks/usePopoverResize'
@@ -27,6 +27,7 @@ interface PopoverProps {
 }
 
 const IMAGE_PAGE_SIZE = 12
+const WIDTH_SYNC_FRAMES = 4
 
 function useAudioPlayer(dictionary: DictionaryResult | null, selectedText: string) {
   const [audioPlaying, setAudioPlaying] = useState(false)
@@ -95,23 +96,35 @@ function useAudioPlayer(dictionary: DictionaryResult | null, selectedText: strin
 export function Popover({ state, selection, dictionary, translation, error, panelMode, enableAudio, autoPlayAudioMode, selectionAnchor, onOpenSettings }: PopoverProps) {
   const [activePanel, setActivePanel] = useState<PopoverOpenPanelMode>('none')
   const [lockedPopoverWidth, setLockedPopoverWidth] = useState<number | null>(null)
+  const [baselinePopoverWidth, setBaselinePopoverWidth] = useState<number | null>(null)
   const [imageLoading, setImageLoading] = useState(false)
   const [imageError, setImageError] = useState<string | null>(null)
   const [imageItems, setImageItems] = useState<ImageOption[]>([])
   const imageRequestIdRef = useRef(0)
   const popoverRef = useRef<HTMLElement | null>(null)
   const autoAudioKeyRef = useRef('')
+  const widthSyncRafRef = useRef(0)
 
   const cleanSelection = normalizeText(selection)
   const selectedText = cleanSelection || 'Selection'
   const { audioError, playAudio, startAudio, stopAudio } = useAudioPlayer(dictionary, selectedText)
 
-  const capturePopoverWidth = useCallback(() => {
-    const width = popoverRef.current?.offsetWidth
-    if (width && width > 0) {
-      setLockedPopoverWidth(width)
-    }
+  const readPopoverWidth = useCallback(() => {
+    const width = popoverRef.current?.getBoundingClientRect().width ?? 0
+    return width > 0 ? Math.ceil(width) : 0
   }, [])
+
+  const capturePopoverWidth = useCallback(() => {
+    const width = Math.max(readPopoverWidth(), baselinePopoverWidth ?? 0)
+    if (width > 0) {
+      setLockedPopoverWidth((current) => {
+        if (current === null) {
+          return width
+        }
+        return Math.max(current, width)
+      })
+    }
+  }, [baselinePopoverWidth, readPopoverWidth])
 
   const togglePanel = useCallback((target: PopoverOpenPanelMode) => {
     setActivePanel((current) => {
@@ -119,14 +132,14 @@ export function Popover({ state, selection, dictionary, translation, error, pane
       if (next === 'none') {
         setLockedPopoverWidth(null)
       } else {
-        const width = popoverRef.current?.offsetWidth
-        if (width && width > 0) {
+        const width = Math.max(readPopoverWidth(), baselinePopoverWidth ?? 0)
+        if (width > 0) {
           setLockedPopoverWidth(width)
         }
       }
       return next
     })
-  }, [])
+  }, [baselinePopoverWidth, readPopoverWidth])
 
   useEffect(() => { setActivePanel(panelMode) }, [panelMode, selection, state])
   useEffect(() => { imageRequestIdRef.current += 1; setImageLoading(false); setImageError(null); setImageItems([]) }, [selection, state])
@@ -144,6 +157,66 @@ export function Popover({ state, selection, dictionary, translation, error, pane
       capturePopoverWidth()
     }
   }, [capturePopoverWidth, hasSubPanel, lockedPopoverWidth])
+
+  useEffect(() => {
+    if (state === 'idle' || state === 'loading' || hasSubPanel) {
+      return
+    }
+
+    const popover = popoverRef.current
+    if (!popover) {
+      return
+    }
+
+    const updateBaselineWidth = () => {
+      const width = readPopoverWidth()
+      if (width > 0) {
+        setBaselinePopoverWidth((current) => {
+          if (current === null) {
+            return width
+          }
+          return Math.max(current, width)
+        })
+      }
+    }
+
+    updateBaselineWidth()
+    if (typeof ResizeObserver === 'undefined') {
+      return
+    }
+
+    const observer = new ResizeObserver(() => {
+      updateBaselineWidth()
+    })
+    observer.observe(popover)
+    return () => {
+      observer.disconnect()
+    }
+  }, [hasSubPanel, readPopoverWidth, state])
+
+  useEffect(() => {
+    if (!hasSubPanel) {
+      return () => {
+        cancelAnimationFrame(widthSyncRafRef.current)
+      }
+    }
+
+    let frame = 0
+    const syncWidth = () => {
+      widthSyncRafRef.current = requestAnimationFrame(() => {
+        capturePopoverWidth()
+        frame += 1
+        if (frame < WIDTH_SYNC_FRAMES) {
+          syncWidth()
+        }
+      })
+    }
+
+    syncWidth()
+    return () => {
+      cancelAnimationFrame(widthSyncRafRef.current)
+    }
+  }, [capturePopoverWidth, hasSubPanel])
 
   const imageQuery = useMemo(() => resolveImageQuery(state, selectedText, dictionary), [dictionary, selectedText, state])
 
@@ -200,12 +273,13 @@ export function Popover({ state, selection, dictionary, translation, error, pane
     hasSubPanel,
     activePanel,
     lockedPopoverWidth,
+    baselinePopoverWidth,
     selectionAnchor,
   )
 
   if (state === 'idle' || state === 'loading') return null
 
-  const lookupData = dictionary ? { word: normalizeText(sanitizeMarkup(dictionary.word || selectedText)), phonetic: normalizeText(sanitizeMarkup(dictionary.phonetic || '')), ...lookupPrimary(dictionary) } : null
+  const lookupData = dictionary ? { word: normalizeText(sanitizeMarkup(dictionary.word || selectedText)), phonetic: normalizePhonetic(dictionary.phonetic || ''), ...lookupPrimary(dictionary) } : null
   const definitionText = lookupData?.firstDefinition || ''
   const translationLines = translation ? sanitizeMarkup(translation.result).split(/\r?\n+/).map(l => normalizeText(l)).filter(Boolean) : []
   const portalTarget = typeof document !== 'undefined' ? document.body : null

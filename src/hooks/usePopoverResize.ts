@@ -20,9 +20,9 @@ interface ScreenBounds {
   bottom: number;
 }
 
-const BASE_WIDTH = 320;
+const BASE_WIDTH = 420;
 const BASE_HEIGHT = 72;
-const MIN_POPOVER_WIDTH = 320;
+const MIN_POPOVER_WIDTH = 420;
 const SUBPANEL_DETAIL_WIDTH = 440;
 const SUBPANEL_IMAGE_WIDTH = 520;
 const SUBPANEL_DETAIL_HEIGHT = 300;
@@ -170,6 +170,7 @@ export function usePopoverResize(
   hasSubPanel: boolean,
   panelMode: string,
   lockedPopoverWidth: number | null,
+  stablePopoverWidth: number | null,
   selectionAnchor: SelectionAnchor | null,
 ) {
   const insetRef = useRef({ x: BASE_INSET_X, y: BASE_INSET_Y });
@@ -209,8 +210,17 @@ export function usePopoverResize(
           return;
         }
 
-        popover.style.removeProperty("width");
-        popover.style.removeProperty("max-width");
+        const preferredWidth =
+          stablePopoverWidth && stablePopoverWidth > 0
+            ? stablePopoverWidth
+            : null;
+        if (preferredWidth) {
+          popover.style.width = `${preferredWidth}px`;
+          popover.style.maxWidth = `${preferredWidth}px`;
+        } else {
+          popover.style.removeProperty("width");
+          popover.style.removeProperty("max-width");
+        }
         popover.style.left = `${BASE_INSET_X}px`;
         popover.style.top = `${BASE_INSET_Y}px`;
         popover.dataset.subpanelSide = "right";
@@ -227,7 +237,9 @@ export function usePopoverResize(
         }
 
         const measuredRect = popover.getBoundingClientRect();
-        const measuredWidth = Math.max(popover.offsetWidth, measuredRect.width);
+        const measuredWidth = preferredWidth
+          ? preferredWidth
+          : Math.max(popover.offsetWidth, measuredRect.width);
         const measuredHeight = Math.max(popover.offsetHeight, measuredRect.height);
         const targetWidth = Math.max(
           MIN_POPOVER_WIDTH,
@@ -446,6 +458,7 @@ export function usePopoverResize(
     panelMode,
     popoverRef,
     popoverState,
+    stablePopoverWidth,
     selectionAnchor,
   ]);
 }
