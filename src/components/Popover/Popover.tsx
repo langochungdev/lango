@@ -28,6 +28,10 @@ interface PopoverProps {
 
 const IMAGE_PAGE_SIZE = 12
 const WIDTH_SYNC_FRAMES = 4
+const MIN_POPOVER_WIDTH = 220
+const MAX_POPOVER_WIDTH = 560
+const CONTENT_CHAR_WIDTH_PX = 7
+const POPOVER_BASE_CONTENT_PADDING_PX = 120
 
 function useAudioPlayer(dictionary: DictionaryResult | null, selectedText: string) {
   const [audioPlaying, setAudioPlaying] = useState(false)
@@ -143,6 +147,52 @@ export function Popover({ state, selection, dictionary, translation, error, pane
 
   useEffect(() => { setActivePanel(panelMode) }, [panelMode, selection, state])
   useEffect(() => { imageRequestIdRef.current += 1; setImageLoading(false); setImageError(null); setImageItems([]) }, [selection, state])
+  useEffect(() => { setBaselinePopoverWidth(null); setLockedPopoverWidth(null) }, [selection])
+
+  const compactLookupScore = useMemo(() => {
+    if (state !== 'lookup' || !dictionary) {
+      return { header: 0, definition: 0 }
+    }
+    const header = normalizeText(
+      sanitizeMarkup(`${dictionary.word || selectedText} ${dictionary.phonetic || ''} ${dictionary.meanings?.[0]?.part_of_speech || ''}`),
+    ).length
+    const definition = normalizeText(
+      sanitizeMarkup(dictionary.meanings?.[0]?.definitions?.[0] || ''),
+    ).length
+    return { header, definition }
+  }, [dictionary, selectedText, state])
+
+  const compactTranslateLength = useMemo(() => {
+    if (state !== 'translate' || !translation) {
+      return 0
+    }
+    return normalizeText(sanitizeMarkup(translation.result)).length
+  }, [state, translation])
+
+  const minPopoverWidth = useMemo(() => {
+    const lookupDensity =
+      compactLookupScore.header + Math.ceil(compactLookupScore.definition * 0.7)
+    const translateDensity = Math.max(
+      compactTranslateLength,
+      Math.ceil(selectedText.length * 0.8),
+    )
+
+    const contentDensity =
+      state === 'lookup'
+        ? Math.max(lookupDensity, selectedText.length)
+        : state === 'translate'
+          ? Math.max(translateDensity, selectedText.length)
+          : selectedText.length
+
+    const estimatedWidth = Math.ceil(
+      POPOVER_BASE_CONTENT_PADDING_PX + contentDensity * CONTENT_CHAR_WIDTH_PX,
+    )
+
+    return Math.min(
+      MAX_POPOVER_WIDTH,
+      Math.max(MIN_POPOVER_WIDTH, estimatedWidth),
+    )
+  }, [compactLookupScore.definition, compactLookupScore.header, compactTranslateLength, selectedText.length, state])
 
   const showDetailsPanel = state === 'lookup' && Boolean(dictionary) && activePanel === 'details'
   const showImagePanel = activePanel === 'images'
@@ -175,6 +225,9 @@ export function Popover({ state, selection, dictionary, translation, error, pane
           if (current === null) {
             return width
           }
+          if (width <= minPopoverWidth) {
+            return width
+          }
           return Math.max(current, width)
         })
       }
@@ -192,7 +245,7 @@ export function Popover({ state, selection, dictionary, translation, error, pane
     return () => {
       observer.disconnect()
     }
-  }, [hasSubPanel, readPopoverWidth, state])
+  }, [hasSubPanel, minPopoverWidth, readPopoverWidth, state])
 
   useEffect(() => {
     if (!hasSubPanel) {
@@ -273,6 +326,7 @@ export function Popover({ state, selection, dictionary, translation, error, pane
     hasSubPanel,
     activePanel,
     lockedPopoverWidth,
+    minPopoverWidth,
     baselinePopoverWidth,
     selectionAnchor,
   )

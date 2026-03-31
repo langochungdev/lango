@@ -265,7 +265,7 @@ button {
     z-index: 9999;
     display: inline-block;
     width: fit-content;
-    min-width: min(420px, calc(100vw - 24px));
+    min-width: min(240px, calc(100vw - 24px));
     max-width: min(560px, calc(100vw - 24px));
     border: 1px solid #d7dde9;
     border-radius: 12px;

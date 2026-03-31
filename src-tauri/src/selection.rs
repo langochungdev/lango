@@ -44,8 +44,10 @@ const DOUBLE_CLICK_MAX_INTERVAL_MS: u64 = 360;
 const POINT_ANCHOR_HALF_WIDTH: i32 = 16;
 const POINT_ANCHOR_HALF_HEIGHT: i32 = 14;
 const POPOVER_BASE_WIDTH: f64 = 420.0;
-const POPOVER_BASE_HEIGHT: f64 = 120.0;
+const POPOVER_BASE_HEIGHT: f64 = 72.0;
 const CURSOR_GAP: i32 = 14;
+const CURSOR_ABOVE_EXTRA_GAP_MAX: i32 = 18;
+const CURSOR_ABOVE_NEAR_BOTTOM_RATIO: f32 = 0.42;
 
 fn auto_selection_state() -> &'static Mutex<AutoSelectionState> {
     AUTO_SELECTION_STATE.get_or_init(|| {
@@ -554,6 +556,21 @@ fn center_distance_to_point(
     i64::from((center_x - point_x).abs() + (center_y - point_y).abs())
 }
 
+fn compute_cursor_above_gap(cursor_y: i32, monitor_top: i32, monitor_bottom: i32) -> i32 {
+    let monitor_height = (monitor_bottom - monitor_top).max(1);
+    let near_bottom_zone = ((monitor_height as f32) * CURSOR_ABOVE_NEAR_BOTTOM_RATIO).round() as i32;
+    let distance_to_bottom = (monitor_bottom - cursor_y).max(0);
+
+    if distance_to_bottom >= near_bottom_zone || near_bottom_zone <= 0 {
+        return CURSOR_GAP;
+    }
+
+    let pressure = near_bottom_zone - distance_to_bottom;
+    let extra = ((pressure * CURSOR_ABOVE_EXTRA_GAP_MAX) / near_bottom_zone)
+        .clamp(0, CURSOR_ABOVE_EXTRA_GAP_MAX);
+    CURSOR_GAP + extra
+}
+
 fn resolve_popover_position(
     app: &AppHandle,
     popover: &tauri::WebviewWindow,
@@ -652,19 +669,21 @@ fn resolve_popover_position(
     let (anchor_cx, anchor_cy) = anchor_center(anchor_rect);
     let cursor_x = anchor_point.as_ref().map_or(anchor_cx, |point| point.x);
     let cursor_y = anchor_point.as_ref().map_or(anchor_cy, |point| point.y);
+    let cursor_gap_below = CURSOR_GAP;
+    let cursor_gap_above = compute_cursor_above_gap(cursor_y, monitor_top, monitor_bottom);
 
     let candidates = [
-        (cursor_x + CURSOR_GAP, cursor_y + CURSOR_GAP),
-        (cursor_x + CURSOR_GAP, cursor_y - height - CURSOR_GAP),
-        (cursor_x - width - CURSOR_GAP, cursor_y + CURSOR_GAP),
+        (cursor_x + cursor_gap_below, cursor_y + cursor_gap_below),
+        (cursor_x + cursor_gap_below, cursor_y - height - cursor_gap_above),
+        (cursor_x - width - cursor_gap_below, cursor_y + cursor_gap_below),
         (
-            cursor_x - width - CURSOR_GAP,
-            cursor_y - height - CURSOR_GAP,
+            cursor_x - width - cursor_gap_below,
+            cursor_y - height - cursor_gap_above,
         ),
-        (cursor_x + CURSOR_GAP, cursor_y - height / 2),
-        (cursor_x - width - CURSOR_GAP, cursor_y - height / 2),
-        (cursor_x - width / 2, cursor_y + CURSOR_GAP),
-        (cursor_x - width / 2, cursor_y - height - CURSOR_GAP),
+        (cursor_x + cursor_gap_below, cursor_y - height / 2),
+        (cursor_x - width - cursor_gap_below, cursor_y - height / 2),
+        (cursor_x - width / 2, cursor_y + cursor_gap_below),
+        (cursor_x - width / 2, cursor_y - height - cursor_gap_above),
         (anchor_rect.right + gap, anchor_cy - height / 2),
         (anchor_rect.left - width - gap, anchor_cy - height / 2),
         (anchor_cx - width / 2, anchor_rect.bottom + gap),
@@ -690,6 +709,33 @@ fn resolve_popover_position(
             best_left = clamped_left;
             best_top = clamped_top;
         }
+    }
+
+    // Keep a clear cursor gap even if scoring picks a candidate too close.
+    let cursor_hit_gap = cursor_gap_above.max(cursor_gap_below);
+    let cursor_hits_x = cursor_x >= best_left - cursor_hit_gap && cursor_x <= best_left + width + cursor_hit_gap;
+    let cursor_hits_y = cursor_y >= best_top - cursor_hit_gap && cursor_y <= best_top + height + cursor_hit_gap;
+    if cursor_hits_x && cursor_hits_y {
+        let preferred_above = cursor_y - height - cursor_gap_above;
+        let preferred_below = cursor_y + cursor_gap_below;
+        let can_place_above = preferred_above >= min_y;
+        let can_place_below = preferred_below <= max_y;
+
+        let target_top = if can_place_above && can_place_below {
+            let above_delta = (best_top - preferred_above).abs();
+            let below_delta = (best_top - preferred_below).abs();
+            if above_delta <= below_delta {
+                preferred_above
+            } else {
+                preferred_below
+            }
+        } else if can_place_above {
+            preferred_above
+        } else {
+            preferred_below
+        };
+
+        best_top = target_top.clamp(min_y, max_y);
     }
 
     PhysicalPosition::new(best_left, best_top)
