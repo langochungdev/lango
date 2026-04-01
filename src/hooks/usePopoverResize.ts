@@ -53,6 +53,7 @@ const POST_SHOW_REMEASURE_MS = [90, 180, 320, 480] as const;
 const VIEWPORT_OVERFLOW_GUARD_PX = 6;
 const MIN_DYNAMIC_WINDOW_GUARD_PX = 2;
 const MAX_DYNAMIC_EDGE_INSET_PX = 28;
+const RESIZE_EPSILON_PX = 2;
 let lastNoSubpanelTrace = { signature: "", at: 0 };
 
 function hasTauriBridge(): boolean {
@@ -437,6 +438,7 @@ export function usePopoverResize(
   const insetRef = useRef({ x: BASE_INSET_X, y: BASE_INSET_Y });
   const resizedRef = useRef(false);
   const lastWindowSizeRef = useRef({ width: BASE_WIDTH, height: BASE_HEIGHT });
+  const noSubpanelContentWidthRef = useRef<number | null>(null);
   const lastAnchorKeyRef = useRef("none");
   const stableScreenPopoverRef = useRef<{ x: number; y: number } | null>(null);
   const previewWindowOffsetRef = useRef({ x: 0, y: 0 });
@@ -450,6 +452,7 @@ export function usePopoverResize(
       insetRef.current = { x: BASE_INSET_X, y: BASE_INSET_Y };
       resizedRef.current = false;
       lastWindowSizeRef.current = { width: BASE_WIDTH, height: BASE_HEIGHT };
+      noSubpanelContentWidthRef.current = null;
       stableScreenPopoverRef.current = null;
       previewWindowOffsetRef.current = { x: 0, y: 0 };
       lastAnchorKeyRef.current = anchorKey;
@@ -505,6 +508,29 @@ export function usePopoverResize(
           popover.offsetHeight,
           measuredRect.height,
         );
+        const measuredContentWidth = Math.max(1, Math.ceil(measuredWidth));
+        const hasHorizontalOverflow =
+          popover.scrollWidth > popover.clientWidth + 1;
+        const overflowContentWidth = Math.max(
+          measuredContentWidth,
+          Math.ceil(Math.max(popover.scrollWidth, measuredRect.width)),
+        );
+        if (noSubpanelContentWidthRef.current === null) {
+          noSubpanelContentWidthRef.current =
+            stablePopoverWidth && stablePopoverWidth > 0
+              ? Math.ceil(stablePopoverWidth)
+              : measuredContentWidth;
+        }
+        if (hasHorizontalOverflow) {
+          noSubpanelContentWidthRef.current = Math.max(
+            noSubpanelContentWidthRef.current,
+            overflowContentWidth,
+          );
+        }
+        const baseContentWidth = Math.max(
+          1,
+          noSubpanelContentWidthRef.current ?? measuredContentWidth,
+        );
         const screenBounds = getScreenBounds();
         const maxWindowHeight = Math.max(
           BASE_HEIGHT,
@@ -517,26 +543,28 @@ export function usePopoverResize(
         );
         const adaptiveMinWidth = Math.min(
           minPopoverWidth,
-          Math.ceil(measuredWidth + 32),
+          Math.ceil(baseContentWidth + 32),
         );
         const minAllowedWidth = Math.max(
-          Math.ceil(measuredWidth),
+          baseContentWidth,
           adaptiveMinWidth,
         );
         const measuredTargetWidth = Math.ceil(
-          measuredWidth + popoverInsets.left + popoverInsets.right,
+          baseContentWidth + popoverInsets.left + popoverInsets.right,
         );
-        const hasHorizontalOverflow =
-          popover.scrollWidth > popover.clientWidth + 1;
         const overflowTargetWidth = Math.ceil(
-          Math.max(popover.scrollWidth, measuredRect.width) +
-            popoverInsets.left +
-            popoverInsets.right,
+          overflowContentWidth + popoverInsets.left + popoverInsets.right,
         );
-        const baseTargetWidth = Math.max(minAllowedWidth, measuredTargetWidth);
+        const minAllowedTargetWidth = Math.ceil(
+          minAllowedWidth + popoverInsets.left + popoverInsets.right,
+        );
+        const baseTargetWidth = Math.max(
+          minAllowedTargetWidth,
+          measuredTargetWidth,
+        );
         const targetWidth = hasHorizontalOverflow
           ? Math.max(baseTargetWidth, overflowTargetWidth)
-          : baseTargetWidth;
+          : Math.max(baseTargetWidth, minAllowedTargetWidth);
         const targetHeight = Math.max(
           1,
           Math.min(
@@ -578,8 +606,9 @@ export function usePopoverResize(
               )
             : targetHeight;
         const viewportMismatch =
-          Math.abs(window.innerWidth - safeTargetWidth) > 2 ||
-          Math.abs(window.innerHeight - safeTargetHeight) > 2;
+          Math.abs(window.innerWidth - safeTargetWidth) > RESIZE_EPSILON_PX ||
+          Math.abs(window.innerHeight - safeTargetHeight) >
+            RESIZE_EPSILON_PX;
         const contentBox = {
           left: insetX,
           top: insetY,
@@ -645,12 +674,13 @@ export function usePopoverResize(
           contentBox,
           anchorToContentGap,
           measured: {
-            width: Math.ceil(measuredWidth),
+            width: measuredContentWidth,
             height: Math.ceil(measuredHeight),
           },
           widthPolicy: {
             minPopoverWidth,
             adaptiveMinWidth,
+            baseContentWidth,
             measuredTargetWidth,
             overflowTargetWidth,
             hasHorizontalOverflow,
@@ -684,8 +714,10 @@ export function usePopoverResize(
           };
         }
         const sizeChanged =
-          safeTargetWidth !== lastWindowSizeRef.current.width ||
-          safeTargetHeight !== lastWindowSizeRef.current.height;
+          Math.abs(safeTargetWidth - lastWindowSizeRef.current.width) >
+            RESIZE_EPSILON_PX ||
+          Math.abs(safeTargetHeight - lastWindowSizeRef.current.height) >
+            RESIZE_EPSILON_PX;
         const shiftX = insetX - previousInset.x;
         const shiftY = insetY - previousInset.y;
         if (
