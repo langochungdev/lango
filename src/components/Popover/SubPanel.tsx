@@ -26,7 +26,7 @@ export function SubPanel({ popoverRef, children, visible, panelMode }: SubPanelP
         position: 'fixed',
         left: `${pos.left}px`,
         top: `${pos.top}px`,
-        maxHeight: `${pos.maxHeight}px`,
+        maxHeight: panelMode === 'images' ? undefined : `${pos.maxHeight}px`,
         zIndex: 10001,
       }}
     >

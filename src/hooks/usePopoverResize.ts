@@ -39,7 +39,7 @@ const BASE_HEIGHT = 72;
 const SUBPANEL_DETAIL_WIDTH = 440;
 const SUBPANEL_IMAGE_WIDTH = 520;
 const SUBPANEL_DETAIL_HEIGHT = 300;
-const SUBPANEL_IMAGE_HEIGHT = 360;
+const SUBPANEL_IMAGE_HEIGHT = 404;
 const BASE_INSET_X = 4;
 const BASE_INSET_Y = 4;
 const GAP = 16;
@@ -393,6 +393,9 @@ function getRenderedSubPanelSize(
     panel.offsetHeight <= 0
   ) {
     return null;
+  }
+  if (panelMode === "images") {
+    return { width: panel.offsetWidth, height: panel.offsetHeight };
   }
   const intrinsicHeight = Math.max(panel.scrollHeight, panel.offsetHeight);
   return { width: panel.offsetWidth, height: intrinsicHeight };

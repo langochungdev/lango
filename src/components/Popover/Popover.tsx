@@ -1,8 +1,6 @@
 // Popover hiển thị kết quả tra từ điển hoặc dịch, với sub-panel tách biệt
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import type { ImageOption } from '@/services/images'
-import { searchImages } from '@/services/images'
 import type { PopoverState } from '@/hooks/usePopover'
 import type { AutoPlayAudioMode, PopoverOpenPanelMode } from '@/types/settings'
 import type { DictionaryResult } from '@/services/dictionary'
@@ -10,6 +8,7 @@ import type { TranslateResult } from '@/services/translate'
 import { normalizeText, sanitizeMarkup, normalizePhonetic, lookupPrimary, resolveImageQuery, buildAlternativeAudioUrl } from '@/components/Popover/popover.utils'
 import { AudioIcon, ImageIcon, SettingsIcon } from '@/components/Popover/PopoverIcons'
 import { SubPanel } from '@/components/Popover/SubPanel'
+import { ImageSubPanel } from '@/components/Popover/ImageSubPanel'
 import { usePopoverResize } from '@/hooks/usePopoverResize'
 import type { SelectionAnchor } from '@/types/selectionAnchor'
 
@@ -26,7 +25,6 @@ interface PopoverProps {
   onOpenSettings?: () => void
 }
 
-const IMAGE_PAGE_SIZE = 12
 const WIDTH_SYNC_FRAMES = 4
 const MIN_POPOVER_WIDTH = 220
 const MAX_POPOVER_WIDTH = 560
@@ -104,10 +102,6 @@ export function Popover({ state, selection, dictionary, translation, error, pane
   const [activePanel, setActivePanel] = useState<PopoverOpenPanelMode>('none')
   const [lockedPopoverWidth, setLockedPopoverWidth] = useState<number | null>(null)
   const [baselinePopoverWidth, setBaselinePopoverWidth] = useState<number | null>(null)
-  const [imageLoading, setImageLoading] = useState(false)
-  const [imageError, setImageError] = useState<string | null>(null)
-  const [imageItems, setImageItems] = useState<ImageOption[]>([])
-  const imageRequestIdRef = useRef(0)
   const popoverRef = useRef<HTMLElement | null>(null)
   const autoAudioKeyRef = useRef('')
   const widthSyncRafRef = useRef(0)
@@ -154,7 +148,6 @@ export function Popover({ state, selection, dictionary, translation, error, pane
   }, [])
 
   useEffect(() => { setActivePanel(panelMode) }, [panelMode, selection, state])
-  useEffect(() => { imageRequestIdRef.current += 1; setImageLoading(false); setImageError(null); setImageItems([]) }, [selection, state])
   useEffect(() => { setBaselinePopoverWidth(null); setLockedPopoverWidth(null) }, [selection])
 
   const compactLookupScore = useMemo(() => {
@@ -307,28 +300,6 @@ export function Popover({ state, selection, dictionary, translation, error, pane
   const imageQuery = useMemo(() => resolveImageQuery(state, selectedText, dictionary), [dictionary, selectedText, state])
 
   useEffect(() => {
-    if (activePanel !== 'images' || !imageQuery) return
-    const requestId = ++imageRequestIdRef.current
-    setImageLoading(true)
-    setImageError(null)
-
-    void (async () => {
-      try {
-        const result = await searchImages({ query: imageQuery, page: 1, page_size: IMAGE_PAGE_SIZE })
-        if (imageRequestIdRef.current !== requestId) return
-        setImageItems(Array.isArray(result.options) ? result.options : [])
-        setImageError(result.error?.trim() ? result.error : null)
-      } catch {
-        if (imageRequestIdRef.current !== requestId) return
-        setImageItems([])
-        setImageError('Image search failed')
-      } finally {
-        if (imageRequestIdRef.current === requestId) setImageLoading(false)
-      }
-    })()
-  }, [activePanel, imageQuery])
-
-  useEffect(() => {
     if (!enableAudio || autoPlayAudioMode === 'off') {
       autoAudioKeyRef.current = ''
       stopAudio()
@@ -444,20 +415,11 @@ export function Popover({ state, selection, dictionary, translation, error, pane
         </div>
       </SubPanel>
 
-      <SubPanel
+      <ImageSubPanel
         popoverRef={popoverRef}
         visible={showImagePanel}
-        panelMode="images"
-      >
-        <div className="apl-subpanel-body apl-image-grid">
-          {!imageLoading && imageItems.length > 0 && imageItems.map((item, i) => (
-            <a key={`${item.src}-${i}`} className="apl-image-card" href={item.page_url || item.src} target="_blank" rel="noopener noreferrer">
-              <img src={item.src} alt={item.title || `${imageQuery} ${i + 1}`} loading={i < 4 ? 'eager' : 'lazy'} />
-            </a>
-          ))}
-          {!imageLoading && imageItems.length === 0 && <p className="apl-meta">{imageError || 'No image results.'}</p>}
-        </div>
-      </SubPanel>
+        imageQuery={imageQuery}
+      />
     </>
   )
 }
