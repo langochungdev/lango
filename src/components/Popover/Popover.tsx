@@ -30,8 +30,11 @@ const IMAGE_PAGE_SIZE = 12
 const WIDTH_SYNC_FRAMES = 4
 const MIN_POPOVER_WIDTH = 220
 const MAX_POPOVER_WIDTH = 560
+const MAX_LOOKUP_MIN_POPOVER_WIDTH = 440
 const CONTENT_CHAR_WIDTH_PX = 7
 const POPOVER_BASE_CONTENT_PADDING_PX = 84
+const LOOKUP_DEFINITION_DENSITY_WEIGHT = 0.24
+const LOOKUP_DEFINITION_DENSITY_CAP = 64
 
 function useAudioPlayer(dictionary: DictionaryResult | null, selectedText: string) {
   const [audioPlaying, setAudioPlaying] = useState(false)
@@ -170,8 +173,13 @@ export function Popover({ state, selection, dictionary, translation, error, pane
   }, [state, translation])
 
   const minPopoverWidth = useMemo(() => {
+    const lookupDefinitionDensity = Math.min(
+      LOOKUP_DEFINITION_DENSITY_CAP,
+      compactLookupScore.definition,
+    )
     const lookupDensity =
-      compactLookupScore.header + Math.ceil(compactLookupScore.definition * 0.7)
+      Math.max(compactLookupScore.header, selectedText.length) +
+      Math.ceil(lookupDefinitionDensity * LOOKUP_DEFINITION_DENSITY_WEIGHT)
     const translateDensity = Math.max(
       compactTranslateLength,
       Math.ceil(selectedText.length * 0.8),
@@ -188,8 +196,11 @@ export function Popover({ state, selection, dictionary, translation, error, pane
       POPOVER_BASE_CONTENT_PADDING_PX + contentDensity * CONTENT_CHAR_WIDTH_PX,
     )
 
+    const maxMinWidth =
+      state === 'lookup' ? MAX_LOOKUP_MIN_POPOVER_WIDTH : MAX_POPOVER_WIDTH
+
     return Math.min(
-      MAX_POPOVER_WIDTH,
+      maxMinWidth,
       Math.max(MIN_POPOVER_WIDTH, estimatedWidth),
     )
   }, [compactLookupScore.definition, compactLookupScore.header, compactTranslateLength, selectedText.length, state])
@@ -358,8 +369,8 @@ export function Popover({ state, selection, dictionary, translation, error, pane
                 </div>
               </div>
               {definitionText && (
-                <button type="button" className="apl-lookup-definition-toggle" aria-expanded={showDetailsPanel} onClick={() => togglePanel('details')}>
-                  <span className={`apl-definition-toggle-icon${showDetailsPanel ? ' is-open' : ''}`}>{'>'}</span>
+                <button type="button" className="apl-lookup-definition-toggle" onClick={() => togglePanel('details')}>
+                  <span className="apl-definition-toggle-icon">{'>'}</span>
                   <span className="apl-lookup-definition">{definitionText}</span>
                 </button>
               )}
