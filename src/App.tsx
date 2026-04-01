@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Popover } from '@/components/Popover/Popover'
 import { DebugLogWindow } from '@/components/DebugLog/DebugLogWindow'
 import { SettingsPanel } from '@/components/Settings/SettingsPanel'
@@ -650,13 +651,31 @@ function PopoverWindow() {
       closeIfVisibleModel('desktop-switch-pagehide')
     }
 
+    let cleanupTauriFocus: (() => void) | null = null
+    if (hasTauriBridge) {
+      const setupTauriFocus = async () => {
+        try {
+          const unlisten = await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+            if (!focused) {
+              closeIfVisibleModel('tauri-window-blur')
+            }
+          })
+          cleanupTauriFocus = unlisten
+        } catch {
+          cleanupTauriFocus = null
+        }
+      }
+      void setupTauriFocus()
+    }
+
     document.addEventListener('visibilitychange', onVisibilityChange)
     window.addEventListener('pagehide', onPageHide)
     return () => {
       document.removeEventListener('visibilitychange', onVisibilityChange)
       window.removeEventListener('pagehide', onPageHide)
+      cleanupTauriFocus?.()
     }
-  }, [closePopover])
+  }, [closePopover, hasTauriBridge])
 
   const openSettingsWindow = useCallback(() => {
     appendDebugLog('popover', 'Open settings window')

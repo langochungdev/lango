@@ -495,7 +495,7 @@ button {
 .apl-subpanel-backdrop {
     position: fixed;
     inset: 0;
-    background: transparent;
+    background: rgba(0, 0, 0, 0.01);
     z-index: 9997;
 }
 

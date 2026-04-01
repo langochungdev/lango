@@ -269,6 +269,11 @@ pub fn resize_popover(
     let popover = app
         .get_webview_window("popover")
         .ok_or_else(|| "popover window not found".to_owned())?;
+        
+    if !popover.is_visible().unwrap_or(false) {
+        return Ok(());
+    }
+
     let size_before_resize = popover.outer_size().ok();
     let position_before_resize = popover.outer_position().ok();
 

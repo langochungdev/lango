@@ -8,7 +8,7 @@ use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Position
 use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetMessageW, EVENT_SYSTEM_DESKTOPSWITCH, MSG, WINEVENT_OUTOFCONTEXT,
+    GetMessageW, MSG, WINEVENT_OUTOFCONTEXT,
 };
 
 use crate::automation;
@@ -355,6 +355,32 @@ fn on_navigation_hotkey_event(app: &AppHandle, event_type: &rdev::EventType) {
     }
 }
 
+fn check_global_outside_click(app: &AppHandle, event_type: &rdev::EventType) {
+    if matches!(event_type, rdev::EventType::ButtonPress(_)) {
+        let (cursor_x, cursor_y) = {
+            let Ok(guard) = mouse_selection_state().lock() else {
+                return;
+            };
+            (guard.cursor_x, guard.cursor_y)
+        };
+
+        if let Some(popover) = app.get_webview_window("popover") {
+            if popover.is_visible().unwrap_or(false) {
+                if let (Ok(pos), Ok(size)) = (popover.outer_position(), popover.outer_size()) {
+                    let left = pos.x as f64 - 4.0;
+                    let top = pos.y as f64 - 4.0;
+                    let right = pos.x as f64 + size.width as f64 + 4.0;
+                    let bottom = pos.y as f64 + size.height as f64 + 4.0;
+
+                    if cursor_x < left || cursor_x > right || cursor_y < top || cursor_y > bottom {
+                        let _ = force_close_popover(app, "global-outside-click");
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScreenPoint {
     pub x: i32,
@@ -437,6 +463,7 @@ pub fn start_selection_listener(app: AppHandle) {
             on_modifier_hotkey_event(&app_for_listener, &event.event_type);
             on_debug_copy_hotkey_event(&app_for_listener, &event.event_type);
             on_navigation_hotkey_event(&app_for_listener, &event.event_type);
+            check_global_outside_click(&app_for_listener, &event.event_type);
 
             if should_trigger_auto_selection(&event) {
                 let app_for_task = app_for_listener.clone();
@@ -471,19 +498,35 @@ pub fn install_popover_window_guards(app: &AppHandle) {
     }
 }
 
+const EVENT_SYSTEM_FOREGROUND: u32 = 0x0003;
+
 #[cfg(target_os = "windows")]
 unsafe extern "system" fn on_windows_desktop_switch(
     _hook: HWINEVENTHOOK,
     event: u32,
-    _hwnd: windows::Win32::Foundation::HWND,
+    hwnd: windows::Win32::Foundation::HWND,
     _id_object: i32,
     _id_child: i32,
     _event_thread: u32,
     _event_time: u32,
 ) {
-    if event == EVENT_SYSTEM_DESKTOPSWITCH {
+    if event == EVENT_SYSTEM_FOREGROUND {
         if let Some(app) = DESKTOP_SWITCH_APP.get() {
-            let _ = force_close_popover(app, "windows-desktop-switch");
+            let mut is_our_window = false;
+            for label in ["main", "popover", "hotkey-indicator", "debug-log"].iter() {
+                if let Some(w) = app.get_webview_window(*label) {
+                    if let Ok(w_hwnd) = w.hwnd() {
+                        if w_hwnd.0 == hwnd.0 {
+                            is_our_window = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if !is_our_window {
+                let _ = force_close_popover(app, "windows-desktop-switch-fg");
+            }
         }
     }
 }
@@ -498,8 +541,8 @@ fn install_windows_desktop_switch_guard(app: &AppHandle) {
 
     std::thread::spawn(|| unsafe {
         let hook = SetWinEventHook(
-            EVENT_SYSTEM_DESKTOPSWITCH,
-            EVENT_SYSTEM_DESKTOPSWITCH,
+            EVENT_SYSTEM_FOREGROUND,
+            EVENT_SYSTEM_FOREGROUND,
             None,
             Some(on_windows_desktop_switch),
             0,
@@ -945,6 +988,11 @@ pub fn reanchor_popover_window(
     let popover = app
         .get_webview_window("popover")
         .ok_or_else(|| "popover window not found".to_owned())?;
+
+    if !popover.is_visible().unwrap_or(false) {
+        return Ok(());
+    }
+
     let target = resolve_popover_position(app, &popover, anchor);
     popover
         .set_position(Position::Physical(target))
