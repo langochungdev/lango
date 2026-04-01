@@ -272,7 +272,7 @@ button {
     background: #ffffff;
     color: #121826;
     box-shadow: 0 14px 36px rgba(18, 24, 38, 0.16);
-    padding: 0.72rem;
+    padding: 0.18rem 0.36rem 0.36rem;
 }
 
 .apl-popover-shell {
@@ -290,7 +290,7 @@ button {
 }
 
 .apl-body {
-    padding: 6px 7px;
+    padding: 3px 4px;
     line-height: 1.45;
 }
 
@@ -301,15 +301,52 @@ button {
 
 .apl-lookup-compact {
     display: grid;
-    gap: 8px;
+    gap: 2px;
 }
 
 .apl-lookup-headerline {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: flex-start;
     gap: 4px;
     flex-wrap: nowrap;
+}
+
+.apl-lookup-headerline .apl-inline-actions {
+    align-self: center;
+    flex-shrink: 0;
+}
+
+.apl-lookup-headerline .apl-inline-actions .apl-button {
+    min-width: 28px;
+    width: 28px;
+    height: 28px;
+    min-height: 28px;
+    padding: 2px;
+    border-radius: 999px;
+    transition: transform 120ms ease, background-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
+    will-change: transform;
+}
+
+.apl-lookup-headerline .apl-inline-actions .apl-audio-icon,
+.apl-lookup-headerline .apl-inline-actions .apl-image-icon,
+.apl-lookup-headerline .apl-inline-actions .apl-settings-icon {
+    width: 20px;
+    height: 20px;
+}
+
+@media (hover: hover) {
+    .apl-lookup-headerline .apl-inline-actions .apl-button:hover:not(:disabled) {
+        background: rgba(30, 58, 138, 0.12);
+        color: #0f2f7a;
+        box-shadow: inset 0 0 0 1px rgba(30, 58, 138, 0.2);
+        transform: translateY(-1px);
+    }
+}
+
+.apl-lookup-headerline .apl-inline-actions .apl-button:active:not(:disabled) {
+    transform: scale(0.94);
+    background: rgba(30, 58, 138, 0.18);
 }
 
 .apl-lookup-headertext {
