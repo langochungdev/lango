@@ -36,8 +36,6 @@ interface PopoverAnchorPlacement {
 
 const BASE_WIDTH = 420;
 const BASE_HEIGHT = 72;
-// const MIN_LOOKUP_HEIGHT = 148;
-// const MIN_TRANSLATE_HEIGHT = 108;
 const SUBPANEL_DETAIL_WIDTH = 440;
 const SUBPANEL_IMAGE_WIDTH = 520;
 const SUBPANEL_DETAIL_HEIGHT = 300;
@@ -396,7 +394,8 @@ function getRenderedSubPanelSize(
   ) {
     return null;
   }
-  return { width: panel.offsetWidth, height: panel.offsetHeight };
+  const intrinsicHeight = Math.max(panel.scrollHeight, panel.offsetHeight);
+  return { width: panel.offsetWidth, height: intrinsicHeight };
 }
 
 function buildPanelRectForSide(
@@ -897,7 +896,23 @@ export function usePopoverResize(
       const stableScreenPopover = stableScreenPopoverRef.current;
       const side = chooseSubPanelSide(screenPopoverRect, screenBounds);
 
-      insetY = BASE_INSET_Y;
+      const desiredPanelHeight = Math.max(1, Math.ceil(panelSize.height));
+      const screenTopLimit = screenBounds.top + BASE_INSET_Y;
+      const screenBottomLimit = screenBounds.bottom - BASE_INSET_Y;
+      const maxInsetY = Math.max(
+        BASE_INSET_Y,
+        screenPopoverRect.top - screenTopLimit,
+      );
+      const requiredInsetYForPanelBottom = Math.max(
+        BASE_INSET_Y,
+        Math.ceil(
+          screenPopoverRect.top +
+            BASE_INSET_Y +
+            desiredPanelHeight -
+            screenBottomLimit,
+        ),
+      );
+      insetY = Math.min(maxInsetY, requiredInsetYForPanelBottom);
       insetX =
         side === "left" ? BASE_INSET_X + panelSize.width + GAP : BASE_INSET_X;
 
@@ -908,9 +923,7 @@ export function usePopoverResize(
         popoverHeight,
       );
 
-      const preferredPanelTop =
-        localPopoverRect.top + (popoverHeight - panelSize.height) / 2;
-      const panelTop = Math.max(BASE_INSET_Y, preferredPanelTop);
+      const panelTop = BASE_INSET_Y;
 
       let localPanelRect = buildPanelRectForSide(
         side,
@@ -927,9 +940,9 @@ export function usePopoverResize(
       );
       const maxPanelHeight = Math.max(
         1,
-        Math.floor(maxWindowHeight - localPanelRect.top - WINDOW_PADDING_Y),
+        Math.floor(maxWindowHeight - localPanelRect.top),
       );
-      const effectivePanelHeight = Math.min(panelSize.height, maxPanelHeight);
+      const effectivePanelHeight = Math.min(desiredPanelHeight, maxPanelHeight);
       const panelWidth = localPanelRect.right - localPanelRect.left;
       const minSubpanelGap = GAP + SUBPANEL_MIN_CLEARANCE_PX;
       let panelLeft = localPanelRect.left;
@@ -978,6 +991,11 @@ export function usePopoverResize(
         panelRect: localPanelRect,
         panelSize,
         effectivePanelHeight,
+        verticalPlacement: {
+          insetY,
+          maxInsetY,
+          requiredInsetYForPanelBottom,
+        },
         window: {
           width: window.innerWidth,
           height: window.innerHeight,

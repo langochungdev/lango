@@ -148,6 +148,11 @@ export function Popover({ state, selection, dictionary, translation, error, pane
     })
   }, [baselinePopoverWidth, readPopoverWidth])
 
+  const closeSubPanel = useCallback(() => {
+    setActivePanel('none')
+    setLockedPopoverWidth(null)
+  }, [])
+
   useEffect(() => { setActivePanel(panelMode) }, [panelMode, selection, state])
   useEffect(() => { imageRequestIdRef.current += 1; setImageLoading(false); setImageError(null); setImageItems([]) }, [selection, state])
   useEffect(() => { setBaselinePopoverWidth(null); setLockedPopoverWidth(null) }, [selection])
@@ -208,6 +213,23 @@ export function Popover({ state, selection, dictionary, translation, error, pane
   const showDetailsPanel = state === 'lookup' && Boolean(dictionary) && activePanel === 'details'
   const showImagePanel = activePanel === 'images'
   const hasSubPanel = (showDetailsPanel && Boolean(dictionary)) || showImagePanel
+
+  useEffect(() => {
+    if (!hasSubPanel) {
+      return
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeSubPanel()
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [closeSubPanel, hasSubPanel])
 
   useEffect(() => {
     if (!hasSubPanel) {
@@ -352,6 +374,19 @@ export function Popover({ state, selection, dictionary, translation, error, pane
 
   return (
     <>
+      {hasSubPanel && createPortal(
+        <div
+          className="apl-subpanel-backdrop"
+          aria-hidden="true"
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeSubPanel()
+            }
+          }}
+        />,
+        portalTarget,
+      )}
+
       {createPortal(
         <section ref={popoverRef} className="apl-popover" data-testid="popover" role="dialog" aria-modal="true" aria-label="Dictover popover">
           {state === 'lookup' && dictionary && lookupData && (

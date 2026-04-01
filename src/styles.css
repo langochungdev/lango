@@ -492,6 +492,13 @@ button {
     box-shadow: 0 16px 34px rgba(18, 24, 38, 0.18);
 }
 
+.apl-subpanel-backdrop {
+    position: fixed;
+    inset: 0;
+    background: transparent;
+    z-index: 9997;
+}
+
 .apl-subpanel[data-panel-mode='images'] {
     width: min(520px, calc(100vw - 24px));
     min-height: 280px;
