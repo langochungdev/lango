@@ -317,12 +317,17 @@ function SettingsWindow() {
   }, [])
 
   return (
-    <main className="apl-settings-shell">
-      <p className="apl-meta">{statusMessage}</p>
-
-      <div className="apl-settings-toolbar">
-        <button type="button" onClick={openDebugWindow}>Open Debug Window</button>
-      </div>
+    <main className={`apl-settings-shell ${status === 'saving' ? 'is-saving' : ''}`}>
+      <header className="apl-settings-header-integrated">
+        <h1>{copy.title}</h1>
+        <div className="apl-settings-toolbar-clean">
+          <div className="apl-settings-status-bar">
+            <span className={`apl-settings-status-dot ${status === 'ready' || status === 'autoSaved' ? 'is-active' : ''}`} />
+            <span>{statusMessage}</span>
+          </div>
+          <button type="button" onClick={openDebugWindow}>Debug Logs</button>
+        </div>
+      </header>
 
       {loadingSettings && (
         <section className="apl-settings-boot" role="status" aria-live="polite">
@@ -585,34 +590,6 @@ function PopoverWindow() {
   }, [])
 
   useEffect(() => {
-    const onKeydown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        closePopover('escape')
-        return
-      }
-
-      if (hasTauriBridge) {
-        return
-      }
-
-      if (event.key === 'F7') {
-        event.preventDefault()
-        clearTraceLogs('local-f7')
-        return
-      }
-
-      if (event.key === 'F8') {
-        event.preventDefault()
-        exportTraceLogs('local-f8')
-      }
-    }
-    window.addEventListener('keydown', onKeydown)
-    return () => {
-      window.removeEventListener('keydown', onKeydown)
-    }
-  }, [clearTraceLogs, closePopover, exportTraceLogs, hasTauriBridge])
-
-  useEffect(() => {
     let cleanupDebugCopy: (() => void) | null = null
     let cleanupDebugClear: (() => void) | null = null
 
@@ -635,13 +612,37 @@ function PopoverWindow() {
         cleanupDebugClear = null
       }
     }
-
     void setupDebugHotkeys()
+
+    const onKeydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closePopover('escape')
+        return
+      }
+
+      if (hasTauriBridge) {
+        return
+      }
+
+      if (event.key === 'F7') {
+        event.preventDefault()
+        clearTraceLogs('local-f7')
+        return
+      }
+
+      if (event.key === 'F8') {
+        event.preventDefault()
+        exportTraceLogs('local-f8')
+      }
+    }
+
+    window.addEventListener('keydown', onKeydown)
     return () => {
+      window.removeEventListener('keydown', onKeydown)
       cleanupDebugCopy?.()
       cleanupDebugClear?.()
     }
-  }, [])
+  }, [clearTraceLogs, closePopover, exportTraceLogs, hasTauriBridge])
 
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
@@ -737,8 +738,17 @@ function PopoverWindow() {
 }
 
 function HotkeyIndicatorWindow() {
+  const cancelLoading = useCallback(() => {
+    void invoke('cancel_popover_loading').catch(() => undefined)
+  }, [])
+
   return (
-    <main className="apl-hotkey-indicator-shell" role="status" aria-live="polite" />
+    <main
+      className="apl-hotkey-indicator-shell"
+      role="status"
+      aria-live="polite"
+      onPointerDown={cancelLoading}
+    />
   )
 }
 

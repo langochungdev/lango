@@ -8,10 +8,10 @@ mod indicator;
 mod selection;
 
 use reqwest::Client;
-use tauri::Manager;
-use tauri_plugin_global_shortcut::{Builder as GlobalShortcutBuilder, ShortcutState};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
+use tauri::Manager;
+use tauri_plugin_global_shortcut::{Builder as GlobalShortcutBuilder, ShortcutState};
 
 fn main() {
     tauri::Builder::default()
@@ -39,9 +39,10 @@ fn main() {
             hotkey::register_hotkeys(&app_handle, &loaded)?;
             selection::install_popover_window_guards(&app_handle);
             selection::start_selection_listener(app_handle.clone());
-            
+
             let quit_i = MenuItem::with_id(&app_handle, "quit", "Quit", true, None::<&str>)?;
-            let settings_i = MenuItem::with_id(&app_handle, "settings", "Settings", true, None::<&str>)?;
+            let settings_i =
+                MenuItem::with_id(&app_handle, "settings", "Settings", true, None::<&str>)?;
             let menu = Menu::with_items(&app_handle, &[&settings_i, &quit_i])?;
 
             let _tray = TrayIconBuilder::new()
@@ -55,12 +56,16 @@ fn main() {
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click { button: MouseButton::Left, .. } = event {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        ..
+                    } = event
+                    {
                         let _ = bridge::show_settings_window(tray.app_handle().clone());
                     }
                 })
                 .build(&app_handle)?;
-                
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -73,6 +78,7 @@ fn main() {
             bridge::hide_popover,
             bridge::show_loading_indicator,
             bridge::hide_loading_indicator,
+            bridge::cancel_popover_loading,
             bridge::take_pending_selection,
             bridge::show_settings_window,
             bridge::hide_settings_window,

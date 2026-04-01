@@ -211,6 +211,14 @@ pub fn hide_loading_indicator(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn cancel_popover_loading(app: AppHandle) -> Result<(), String> {
+    hotkey::cancel_active_hotkey_translate();
+    let _ = app.emit("force-close-popover", "loading-click-cancel".to_owned());
+    let _ = selection::hide_popover_window(&app);
+    indicator::hide_hotkey_indicator(&app)
+}
+
+#[tauri::command]
 pub fn take_pending_selection() -> Result<Option<selection::SelectionEvent>, String> {
     selection::take_pending_selection()
 }
@@ -220,13 +228,13 @@ pub fn show_settings_window(app: AppHandle) -> Result<(), String> {
     let main = app
         .get_webview_window("main")
         .ok_or_else(|| "main window not found".to_owned())?;
-        
+
     let _ = main.set_always_on_top(true);
     let _ = main.center();
     main.show()
         .map_err(|err| format!("show settings window failed: {err}"))?;
     let _ = main.set_always_on_top(false);
-    
+
     main.set_focus()
         .map_err(|err| format!("focus settings window failed: {err}"))?;
     Ok(())
@@ -283,7 +291,7 @@ pub fn resize_popover(
     let popover = app
         .get_webview_window("popover")
         .ok_or_else(|| "popover window not found".to_owned())?;
-        
+
     if !popover.is_visible().unwrap_or(false) {
         return Ok(());
     }

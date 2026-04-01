@@ -1,4 +1,6 @@
 use serde::Serialize;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
@@ -23,6 +25,39 @@ pub struct HotkeyTranslationEvent {
     pub source: String,
     pub target: String,
     pub shortcut: String,
+}
+
+static LAST_TRANSLATION: OnceLock<Mutex<Option<(String, String)>>> = OnceLock::new();
+static HOTKEY_TRANSLATE_SEQ: AtomicU64 = AtomicU64::new(0);
+static HOTKEY_TRANSLATE_CANCELLED_SEQ: AtomicU64 = AtomicU64::new(0);
+
+fn begin_hotkey_translate_request() -> u64 {
+    HOTKEY_TRANSLATE_SEQ.fetch_add(1, Ordering::Relaxed) + 1
+}
+
+fn is_hotkey_translate_cancelled(request_id: u64) -> bool {
+    HOTKEY_TRANSLATE_CANCELLED_SEQ.load(Ordering::Relaxed) >= request_id
+}
+
+pub fn cancel_active_hotkey_translate() {
+    let current = HOTKEY_TRANSLATE_SEQ.load(Ordering::Relaxed);
+    HOTKEY_TRANSLATE_CANCELLED_SEQ.store(current, Ordering::Relaxed);
+}
+
+fn get_last_translation() -> Option<(String, String)> {
+    LAST_TRANSLATION
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap()
+        .clone()
+}
+
+fn set_last_translation(original: String, translated: String) {
+    let mut guard = LAST_TRANSLATION
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap();
+    *guard = Some((original, translated));
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -323,6 +358,8 @@ async fn on_translate_replace_triggered(
     config: AppConfig,
     shortcut: String,
 ) -> Result<(), String> {
+    let request_id = begin_hotkey_translate_request();
+
     let cursor = tauri::async_runtime::spawn_blocking(automation::cursor_position)
         .await
         .ok()
@@ -331,12 +368,36 @@ async fn on_translate_replace_triggered(
     let started_at = Instant::now();
 
     let result = async {
+        if is_hotkey_translate_cancelled(request_id) {
+            return Ok::<Option<(String, String)>, String>(None);
+        }
+
         let state = app.state::<AppState>();
         let original = capture_active_document_text_stable().await?;
 
         let source_text = original.replace('\r', "");
         if source_text.trim().is_empty() {
-            return Ok(());
+            return Ok::<Option<(String, String)>, String>(None);
+        }
+
+        if is_hotkey_translate_cancelled(request_id) {
+            return Ok::<Option<(String, String)>, String>(None);
+        }
+
+        if let Some((last_orig, last_trans)) = get_last_translation() {
+            if source_text == last_trans {
+                if is_hotkey_translate_cancelled(request_id) {
+                    return Ok::<Option<(String, String)>, String>(None);
+                }
+                replace_active_document_text_stable(last_orig.clone()).await?;
+                return Ok(Some((last_trans, last_orig)));
+            } else if source_text == last_orig {
+                if is_hotkey_translate_cancelled(request_id) {
+                    return Ok::<Option<(String, String)>, String>(None);
+                }
+                replace_active_document_text_stable(last_trans.clone()).await?;
+                return Ok(Some((last_orig, last_trans)));
+            }
         }
 
         let payload = TranslatePayload {
@@ -348,24 +409,38 @@ async fn on_translate_replace_triggered(
         let _ = indicator::show_hotkey_indicator(&app, cursor);
         let response = bridge::translate_via_sidecar(&state.client, payload).await?;
         let _ = indicator::hide_hotkey_indicator(&app);
+
+        if is_hotkey_translate_cancelled(request_id) {
+            return Ok::<Option<(String, String)>, String>(None);
+        }
+
         let translated = sanitize_translation_text(&response.result);
         if translated.trim().is_empty() {
-            return Ok(());
+            return Ok::<Option<(String, String)>, String>(None);
+        }
+
+        if is_hotkey_translate_cancelled(request_id) {
+            return Ok::<Option<(String, String)>, String>(None);
         }
 
         replace_active_document_text_stable(translated.clone()).await?;
+        set_last_translation(source_text.clone(), translated.clone());
 
+        Ok(Some((source_text, translated)))
+    }
+    .await?;
+
+    if let Some((orig, trans)) = result {
         let event = HotkeyTranslationEvent {
-            original: source_text,
-            translated,
+            original: orig,
+            translated: trans,
             source: config.quick_translate_source_language,
             target: config.quick_translate_target_language,
             shortcut,
         };
         app.emit_to("main", "hotkey-translated", event)
-            .map_err(|err| format!("emit hotkey event failed: {err}"))
+            .map_err(|err| format!("emit hotkey event failed: {err}"))?;
     }
-    .await;
 
     let remaining =
         Duration::from_millis(HOTKEY_LOADING_MIN_MS).saturating_sub(started_at.elapsed());
@@ -376,7 +451,7 @@ async fn on_translate_replace_triggered(
         .await;
     }
     let _ = indicator::hide_hotkey_indicator(&app);
-    result
+    Ok(())
 }
 
 #[cfg(test)]
