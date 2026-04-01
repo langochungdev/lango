@@ -12,9 +12,11 @@ export interface AppSettings {
   enable_lookup: boolean;
   enable_translate: boolean;
   enable_audio: boolean;
+  enable_ocr: boolean;
   auto_play_audio_mode: AutoPlayAudioMode;
   popover_trigger_mode: PopoverTriggerMode;
   popover_shortcut: string;
+  ocr_hotkey: string;
   source_language: InputLanguageCode;
   target_language: OutputLanguageCode;
   quick_translate_source_language: InputLanguageCode;
@@ -103,9 +105,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   enable_lookup: true,
   enable_translate: true,
   enable_audio: true,
+  enable_ocr: true,
   auto_play_audio_mode: "word",
   popover_trigger_mode: "auto",
   popover_shortcut: "Ctrl+Shift+D",
+  ocr_hotkey: "Ctrl+Shift+S",
   source_language: "en",
   target_language: "vi",
   quick_translate_source_language: "auto",
@@ -126,6 +130,11 @@ export function sanitizeSettings(partial: Partial<AppSettings>): AppSettings {
   const popoverShortcut = sanitizeShortcut(
     merged.popover_shortcut,
     DEFAULT_SETTINGS.popover_shortcut,
+    false,
+  );
+  const ocrHotkey = sanitizeShortcut(
+    merged.ocr_hotkey,
+    DEFAULT_SETTINGS.ocr_hotkey,
     false,
   );
   const hotkeyTranslateShortcut = sanitizeShortcut(
@@ -158,10 +167,12 @@ export function sanitizeSettings(partial: Partial<AppSettings>): AppSettings {
     enable_lookup: merged.enable_lookup !== false,
     enable_translate: merged.enable_translate !== false,
     enable_audio: merged.enable_audio !== false,
+    enable_ocr: merged.enable_ocr !== false,
     show_example: merged.show_example !== false,
     auto_play_audio_mode: audioMode,
     popover_trigger_mode: triggerMode,
     popover_shortcut: popoverShortcut,
+    ocr_hotkey: ocrHotkey,
     source_language: sourceLanguage,
     target_language: targetLanguage,
     quick_translate_source_language: quickTranslateSourceLanguage,

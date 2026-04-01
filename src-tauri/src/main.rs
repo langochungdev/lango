@@ -5,6 +5,7 @@ mod bridge;
 mod config;
 mod hotkey;
 mod indicator;
+mod ocr;
 mod selection;
 
 use reqwest::Client;
@@ -77,8 +78,11 @@ fn main() {
             bridge::emit_selection_changed,
             bridge::hide_popover,
             bridge::show_loading_indicator,
+            bridge::show_ocr_overlay,
             bridge::hide_loading_indicator,
+            bridge::cancel_ocr_overlay,
             bridge::cancel_popover_loading,
+            bridge::submit_ocr_selection,
             bridge::take_pending_selection,
             bridge::show_settings_window,
             bridge::hide_settings_window,

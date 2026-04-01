@@ -12,6 +12,7 @@ use crate::indicator;
 use crate::selection;
 
 const DEFAULT_POPOVER_SHORTCUT: &str = "Ctrl+Shift+D";
+const DEFAULT_OCR_SHORTCUT: &str = "Ctrl+Shift+S";
 const DEFAULT_TRANSLATE_SHORTCUT: &str = "Shift";
 const HOTKEY_CAPTURE_SETTLE_MS: u64 = 90;
 const HOTKEY_RETRY_DELAY_MS: u64 = 120;
@@ -27,9 +28,27 @@ pub struct HotkeyTranslationEvent {
     pub shortcut: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct HotkeyTraceEvent {
+    stage: String,
+    shortcut: String,
+    detail: String,
+}
+
 static LAST_TRANSLATION: OnceLock<Mutex<Option<(String, String)>>> = OnceLock::new();
 static HOTKEY_TRANSLATE_SEQ: AtomicU64 = AtomicU64::new(0);
 static HOTKEY_TRANSLATE_CANCELLED_SEQ: AtomicU64 = AtomicU64::new(0);
+
+fn emit_hotkey_trace(app: &AppHandle, stage: &str, shortcut: &str, detail: String) {
+    let _ = app.emit(
+        "hotkey-trace",
+        HotkeyTraceEvent {
+            stage: stage.to_owned(),
+            shortcut: shortcut.to_owned(),
+            detail,
+        },
+    );
+}
 
 fn begin_hotkey_translate_request() -> u64 {
     HOTKEY_TRANSLATE_SEQ.fetch_add(1, Ordering::Relaxed) + 1
@@ -63,15 +82,79 @@ fn set_last_translation(original: String, translated: String) {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HotkeyAction {
     ShowPopover,
+    CaptureOcr,
     TranslateReplace,
 }
 
 fn normalize_shortcut(shortcut: &str) -> String {
-    shortcut
+    let mut has_ctrl = false;
+    let mut has_alt = false;
+    let mut has_meta = false;
+    let mut has_shift = false;
+    let mut key_token: Option<String> = None;
+
+    for token in shortcut
         .split('+')
-        .map(|part| part.trim().to_ascii_lowercase())
-        .collect::<Vec<String>>()
-        .join("+")
+        .map(|part| part.trim())
+        .filter(|part| !part.is_empty())
+    {
+        let lower = token.to_ascii_lowercase();
+        match lower.as_str() {
+            "ctrl" | "control" | "cmdorctrl" | "commandorcontrol" => {
+                has_ctrl = true;
+            }
+            "alt" => {
+                has_alt = true;
+            }
+            "cmd" | "meta" => {
+                has_meta = true;
+            }
+            "shift" => {
+                has_shift = true;
+            }
+            _ => {
+                // Global shortcut callback may report keys as KeyA/Digit1 while
+                // user settings are stored as A/1. Normalize both forms.
+                let normalized = if let Some(rest) = lower.strip_prefix("key") {
+                    if rest.len() == 1 && rest.chars().all(|ch| ch.is_ascii_alphabetic()) {
+                        rest.to_owned()
+                    } else {
+                        lower
+                    }
+                } else if let Some(rest) = lower.strip_prefix("digit") {
+                    if !rest.is_empty() && rest.chars().all(|ch| ch.is_ascii_digit()) {
+                        rest.to_owned()
+                    } else {
+                        lower
+                    }
+                } else {
+                    lower
+                };
+
+                key_token = Some(normalized);
+            }
+        }
+    }
+
+    let mut canonical: Vec<String> = Vec::new();
+    if has_ctrl {
+        canonical.push("ctrl".to_owned());
+    }
+    if has_alt {
+        canonical.push("alt".to_owned());
+    }
+    if has_meta {
+        canonical.push("meta".to_owned());
+    }
+    if has_shift {
+        canonical.push("shift".to_owned());
+    }
+
+    if let Some(key) = key_token {
+        canonical.push(key);
+    }
+
+    canonical.join("+")
 }
 
 fn is_valid_modifier(token: &str) -> bool {
@@ -196,12 +279,14 @@ pub fn parse_hotkey(shortcut: &str) -> Result<(), String> {
 pub fn register_hotkeys(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
     let popover_shortcut =
         effective_shortcut(&config.popover_shortcut, DEFAULT_POPOVER_SHORTCUT, false);
+    let ocr_shortcut = effective_shortcut(&config.ocr_hotkey, DEFAULT_OCR_SHORTCUT, false);
     let translate_shortcut = effective_shortcut(
         &config.hotkey_translate_shortcut,
         DEFAULT_TRANSLATE_SHORTCUT,
         true,
     );
     let manager = app.global_shortcut();
+
     manager
         .unregister_all()
         .map_err(|err| format!("unregister hotkeys failed: {err}"))?;
@@ -209,19 +294,52 @@ pub fn register_hotkeys(app: &AppHandle, config: &AppConfig) -> Result<(), Strin
         .register(popover_shortcut.as_str())
         .map_err(|err| format!("register popover shortcut failed: {err}"))?;
 
-    if !is_modifier_only_shortcut(&translate_shortcut)
+    let ocr_state_text = if config.enable_ocr
+        && normalize_shortcut(&ocr_shortcut) != normalize_shortcut(&popover_shortcut)
+    {
+        manager
+            .register(ocr_shortcut.as_str())
+            .map_err(|err| format!("register ocr shortcut failed: {err}"))?;
+        format!("registered:{ocr_shortcut}")
+    } else if config.enable_ocr {
+        format!("skipped:duplicate-with-popover:{ocr_shortcut}")
+    } else {
+        "disabled".to_owned()
+    };
+
+    let translate_state_text = if !is_modifier_only_shortcut(&translate_shortcut)
         && normalize_shortcut(&popover_shortcut) != normalize_shortcut(&translate_shortcut)
+        && normalize_shortcut(&ocr_shortcut) != normalize_shortcut(&translate_shortcut)
     {
         manager
             .register(translate_shortcut.as_str())
             .map_err(|err| format!("register translate shortcut failed: {err}"))?;
-    }
+        format!("registered:{translate_shortcut}")
+    } else if is_modifier_only_shortcut(&translate_shortcut) {
+        format!("modifier-only:{translate_shortcut}")
+    } else {
+        format!("skipped:duplicate:{translate_shortcut}")
+    };
+
+    emit_hotkey_trace(
+        app,
+        "register",
+        "system",
+        format!(
+            "popover={popover_shortcut} | ocr={ocr_state_text} | translate={translate_state_text}"
+        ),
+    );
 
     Ok(())
 }
 
 fn resolve_shortcut_action(config: &AppConfig, shortcut: &str) -> Option<HotkeyAction> {
     let incoming = normalize_shortcut(shortcut);
+    let ocr = normalize_shortcut(&effective_shortcut(
+        &config.ocr_hotkey,
+        DEFAULT_OCR_SHORTCUT,
+        false,
+    ));
     let popover = normalize_shortcut(&effective_shortcut(
         &config.popover_shortcut,
         DEFAULT_POPOVER_SHORTCUT,
@@ -235,6 +353,9 @@ fn resolve_shortcut_action(config: &AppConfig, shortcut: &str) -> Option<HotkeyA
 
     if popover == translate && incoming == translate {
         return Some(HotkeyAction::TranslateReplace);
+    }
+    if config.enable_ocr && incoming == ocr {
+        return Some(HotkeyAction::CaptureOcr);
     }
     if incoming == popover {
         return Some(HotkeyAction::ShowPopover);
@@ -255,20 +376,83 @@ pub async fn handle_global_shortcut(app: AppHandle, shortcut: String) -> Result<
         guard.clone()
     };
 
+    let incoming = normalize_shortcut(&shortcut);
+    emit_hotkey_trace(&app, "pressed", &shortcut, format!("normalized={incoming}"));
+
     let Some(action) = resolve_shortcut_action(&config, &shortcut) else {
+        emit_hotkey_trace(
+            &app,
+            "unmatched",
+            &shortcut,
+            format!(
+                "normalized={incoming} | popover={} | ocr={} | translate={} | ocrEnabled={}",
+                normalize_shortcut(&effective_shortcut(
+                    &config.popover_shortcut,
+                    DEFAULT_POPOVER_SHORTCUT,
+                    false,
+                )),
+                normalize_shortcut(&effective_shortcut(
+                    &config.ocr_hotkey,
+                    DEFAULT_OCR_SHORTCUT,
+                    false,
+                )),
+                normalize_shortcut(&effective_shortcut(
+                    &config.hotkey_translate_shortcut,
+                    DEFAULT_TRANSLATE_SHORTCUT,
+                    true,
+                )),
+                config.enable_ocr,
+            ),
+        );
         return Ok(());
     };
 
-    match action {
-        HotkeyAction::ShowPopover => on_popover_triggered(app).await,
+    let action_name = match action {
+        HotkeyAction::ShowPopover => "show-popover",
+        HotkeyAction::CaptureOcr => "capture-ocr",
+        HotkeyAction::TranslateReplace => "translate-replace",
+    };
+    emit_hotkey_trace(
+        &app,
+        "resolved",
+        &shortcut,
+        format!("normalized={incoming} | action={action_name}"),
+    );
+
+    let result = match action {
+        HotkeyAction::ShowPopover => on_popover_triggered(app.clone()).await,
+        HotkeyAction::CaptureOcr => on_ocr_capture_triggered(app.clone()),
         HotkeyAction::TranslateReplace => {
-            on_translate_replace_triggered(app, config, shortcut).await
+            on_translate_replace_triggered(app.clone(), config, shortcut.clone()).await
         }
+    };
+
+    match &result {
+        Ok(()) => emit_hotkey_trace(
+            &app,
+            "completed",
+            &shortcut,
+            format!("normalized={incoming} | action={action_name}"),
+        ),
+        Err(err) => emit_hotkey_trace(
+            &app,
+            "failed",
+            &shortcut,
+            format!("normalized={incoming} | action={action_name} | error={err}"),
+        ),
     }
+
+    result
 }
 
 pub async fn handle_modifier_shortcut(app: AppHandle) -> Result<(), String> {
     if selection::is_any_app_window_focused(&app) {
+        emit_hotkey_trace(
+            &app,
+            "modifier-skip",
+            "Shift",
+            "ignored-because-app-window-focused".to_owned(),
+        );
         return Ok(());
     }
 
@@ -287,10 +471,32 @@ pub async fn handle_modifier_shortcut(app: AppHandle) -> Result<(), String> {
         true,
     ));
     if translate != "shift" {
+        emit_hotkey_trace(
+            &app,
+            "modifier-skip",
+            "Shift",
+            format!("configured={translate}"),
+        );
         return Ok(());
     }
 
-    on_translate_replace_triggered(app, config, "Shift".to_owned()).await
+    emit_hotkey_trace(
+        &app,
+        "modifier-triggered",
+        "Shift",
+        "action=translate-replace".to_owned(),
+    );
+
+    let result = on_translate_replace_triggered(app.clone(), config, "Shift".to_owned()).await;
+    if let Err(err) = &result {
+        emit_hotkey_trace(
+            &app,
+            "modifier-failed",
+            "Shift",
+            format!("action=translate-replace | error={err}"),
+        );
+    }
+    result
 }
 
 async fn capture_active_document_text_stable() -> Result<String, String> {
@@ -351,6 +557,10 @@ async fn on_popover_triggered(app: AppHandle) -> Result<(), String> {
         "shortcut".to_owned(),
         cursor,
     )
+}
+
+fn on_ocr_capture_triggered(app: AppHandle) -> Result<(), String> {
+    bridge::show_ocr_overlay(app)
 }
 
 async fn on_translate_replace_triggered(

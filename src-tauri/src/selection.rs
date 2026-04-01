@@ -7,9 +7,7 @@ use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Position
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
 #[cfg(target_os = "windows")]
-use windows::Win32::UI::WindowsAndMessaging::{
-    GetMessageW, MSG, WINEVENT_OUTOFCONTEXT,
-};
+use windows::Win32::UI::WindowsAndMessaging::{GetMessageW, MSG, WINEVENT_OUTOFCONTEXT};
 
 use crate::automation;
 use crate::bridge::AppState;
@@ -513,7 +511,15 @@ unsafe extern "system" fn on_windows_desktop_switch(
     if event == EVENT_SYSTEM_FOREGROUND {
         if let Some(app) = DESKTOP_SWITCH_APP.get() {
             let mut is_our_window = false;
-            for label in ["main", "popover", "hotkey-indicator", "debug-log"].iter() {
+            for label in [
+                "main",
+                "popover",
+                "hotkey-indicator",
+                "ocr-overlay",
+                "debug-log",
+            ]
+            .iter()
+            {
                 if let Some(w) = app.get_webview_window(*label) {
                     if let Ok(w_hwnd) = w.hwnd() {
                         if w_hwnd.0 == hwnd.0 {
@@ -576,6 +582,11 @@ pub(crate) fn is_any_app_window_focused(app: &AppHandle) -> bool {
     }
     if let Some(indicator) = app.get_webview_window("hotkey-indicator") {
         if indicator.is_focused().unwrap_or(false) {
+            return true;
+        }
+    }
+    if let Some(ocr_overlay) = app.get_webview_window("ocr-overlay") {
+        if ocr_overlay.is_focused().unwrap_or(false) {
             return true;
         }
     }

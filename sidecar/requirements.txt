@@ -3,3 +3,6 @@ uvicorn[standard]
 requests
 argostranslate
 langdetect
+easyocr
+pillow
+numpy

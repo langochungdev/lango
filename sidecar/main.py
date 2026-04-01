@@ -5,9 +5,11 @@ from pydantic import BaseModel, Field, field_validator
 
 try:
     from .image import search_images
+    from .ocr import run_ocr
     from .translation import lookup_dictionary, translate
 except ImportError:
     from image import search_images
+    from ocr import run_ocr
     from translation import lookup_dictionary, translate
 
 
@@ -64,6 +66,26 @@ class ImageSearchRequest(BaseModel):
     page_size: int = Field(default=12, ge=1, le=24)
 
 
+class OcrRequest(BaseModel):
+    image_base64: str = Field(min_length=1)
+    source: str = Field(default="auto")
+    target: str = Field(default="en")
+
+    @field_validator("source")
+    @classmethod
+    def validate_ocr_source(cls, value: str) -> str:
+        if value not in SUPPORTED_SOURCE_LANGS:
+            raise ValueError("unsupported source language")
+        return value
+
+    @field_validator("target")
+    @classmethod
+    def validate_ocr_target(cls, value: str) -> str:
+        if value not in SUPPORTED_TARGET_LANGS:
+            raise ValueError("unsupported target language")
+        return value
+
+
 app = FastAPI(title="DictOver Sidecar", version="0.1.0")
 
 
@@ -97,5 +119,13 @@ async def lookup_endpoint(req: LookupRequest) -> dict:
 async def image_search_endpoint(req: ImageSearchRequest) -> dict:
     try:
         return search_images(req.query, req.page, req.page_size)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/ocr")
+async def ocr_endpoint(req: OcrRequest) -> dict[str, str]:
+    try:
+        return {"text": run_ocr(req.image_base64, req.source, req.target)}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

@@ -24,6 +24,9 @@ export interface SettingsCopy {
   popoverTriggerAndPanel: string;
   popoverTrigger: string;
   popoverShortcut: string;
+  ocrShortcut: string;
+  enableOcr: string;
+  ocrLanguageHint: string;
   panelMode: string;
   autoPlayAudio: string;
   triggerAuto: string;
@@ -74,6 +77,10 @@ const EN_COPY: SettingsCopy = {
   popoverTriggerAndPanel: "Popover Trigger And Panel",
   popoverTrigger: "Popover Trigger",
   popoverShortcut: "Popover Shortcut",
+  ocrShortcut: "OCR Shortcut",
+  enableOcr: "Enable OCR Capture",
+  ocrLanguageHint:
+    "OCR uses Popover input/output language directly. Hotkey works globally when focus is outside Dictover windows.",
   panelMode: "Open Panel Mode",
   autoPlayAudio: "Auto Play Audio",
   triggerAuto: "Auto",
@@ -125,6 +132,10 @@ const VI_COPY: SettingsCopy = {
   popoverTriggerAndPanel: "Kích hoạt Popover và Panel",
   popoverTrigger: "Cách mở Popover",
   popoverShortcut: "Phím tắt Popover",
+  ocrShortcut: "Phím tắt OCR",
+  enableOcr: "Bật OCR từ vùng ảnh",
+  ocrLanguageHint:
+    "OCR dùng trực tiếp ngôn ngữ vào/ra của Popover. Phím tắt hoạt động toàn cục khi focus nằm ngoài cửa sổ Dictover.",
   panelMode: "Chế độ panel mở",
   autoPlayAudio: "Tự phát âm thanh",
   triggerAuto: "Tự động",

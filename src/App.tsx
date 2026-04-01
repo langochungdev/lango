@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Popover } from '@/components/Popover/Popover'
 import { DebugLogWindow } from '@/components/DebugLog/DebugLogWindow'
+import { OcrOverlayWindow } from '@/components/OcrOverlay/OcrOverlayWindow'
 import { SettingsPanel } from '@/components/Settings/SettingsPanel'
 import { getSettingsCopy } from '@/constants/settingsI18n'
 import { usePopover, type PopoverState } from '@/hooks/usePopover'
@@ -31,6 +32,12 @@ interface HotkeyTranslationPayload {
   shortcut: string
 }
 
+interface HotkeyTracePayload {
+  stage?: string
+  shortcut?: string
+  detail?: string
+}
+
 type SettingsStatus =
   | 'ready'
   | 'usingDefaults'
@@ -48,6 +55,7 @@ const PREVIEW_MODE =
 
 const IS_POPOVER_WINDOW = WINDOW_MODE === 'popover'
 const IS_HOTKEY_INDICATOR_WINDOW = WINDOW_MODE === 'hotkey-indicator'
+const IS_OCR_OVERLAY_WINDOW = WINDOW_MODE === 'ocr-overlay'
 const IS_DEBUG_LOG_WINDOW = WINDOW_MODE === 'debug-log'
 const IS_PREVIEW_WINDOW = WINDOW_MODE === 'preview' || PREVIEW_MODE
 
@@ -581,6 +589,7 @@ function PopoverWindow() {
   useEffect(() => {
     let cleanupDebugCopy: (() => void) | null = null
     let cleanupDebugClear: (() => void) | null = null
+    let cleanupHotkeyTrace: (() => void) | null = null
 
     const setupDebugHotkeys = async () => {
       try {
@@ -599,6 +608,28 @@ function PopoverWindow() {
         cleanupDebugClear = unlistenDebugClear
       } catch {
         cleanupDebugClear = null
+      }
+
+      try {
+        const unlistenHotkeyTrace = await listen<HotkeyTracePayload>('hotkey-trace', (event) => {
+          const stage = typeof event.payload?.stage === 'string' && event.payload.stage.trim()
+            ? event.payload.stage.trim()
+            : 'unknown-stage'
+          const shortcut = typeof event.payload?.shortcut === 'string' && event.payload.shortcut.trim()
+            ? event.payload.shortcut.trim()
+            : 'unknown-shortcut'
+          const detail = typeof event.payload?.detail === 'string' && event.payload.detail.trim()
+            ? event.payload.detail.trim()
+            : ''
+          appendDebugLog(
+            'trace',
+            `Hotkey ${stage}`,
+            detail ? `${shortcut} | ${detail}` : shortcut,
+          )
+        })
+        cleanupHotkeyTrace = unlistenHotkeyTrace
+      } catch {
+        cleanupHotkeyTrace = null
       }
     }
     void setupDebugHotkeys()
@@ -630,6 +661,7 @@ function PopoverWindow() {
       window.removeEventListener('keydown', onKeydown)
       cleanupDebugCopy?.()
       cleanupDebugClear?.()
+      cleanupHotkeyTrace?.()
     }
   }, [clearTraceLogs, closePopover, exportTraceLogs, hasTauriBridge])
 
@@ -877,16 +909,18 @@ function PreviewWindow() {
 
 export function App() {
   useEffect(() => {
-    const isSettings = !IS_POPOVER_WINDOW && !IS_HOTKEY_INDICATOR_WINDOW && !IS_DEBUG_LOG_WINDOW && !IS_PREVIEW_WINDOW
+    const isSettings = !IS_POPOVER_WINDOW && !IS_HOTKEY_INDICATOR_WINDOW && !IS_OCR_OVERLAY_WINDOW && !IS_DEBUG_LOG_WINDOW && !IS_PREVIEW_WINDOW
     document.body.classList.toggle('apl-settings-body', isSettings)
     document.body.classList.toggle('apl-popover-body', IS_POPOVER_WINDOW)
     document.body.classList.toggle('apl-hotkey-indicator-body', IS_HOTKEY_INDICATOR_WINDOW)
+    document.body.classList.toggle('apl-ocr-overlay-body', IS_OCR_OVERLAY_WINDOW)
     document.body.classList.toggle('apl-debug-body', IS_DEBUG_LOG_WINDOW)
     document.body.classList.toggle('apl-preview-body', IS_PREVIEW_WINDOW)
     return () => {
       document.body.classList.remove('apl-settings-body')
       document.body.classList.remove('apl-popover-body')
       document.body.classList.remove('apl-hotkey-indicator-body')
+      document.body.classList.remove('apl-ocr-overlay-body')
       document.body.classList.remove('apl-debug-body')
       document.body.classList.remove('apl-preview-body')
     }
@@ -894,6 +928,10 @@ export function App() {
 
   if (IS_HOTKEY_INDICATOR_WINDOW) {
     return <HotkeyIndicatorWindow />
+  }
+
+  if (IS_OCR_OVERLAY_WINDOW) {
+    return <OcrOverlayWindow />
   }
 
   if (IS_POPOVER_WINDOW) {

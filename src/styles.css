@@ -41,6 +41,12 @@ body.apl-hotkey-indicator-body {
     background: transparent;
 }
 
+body.apl-ocr-overlay-body {
+    min-height: 100vh;
+    background: transparent;
+    overflow: hidden;
+}
+
 body.apl-debug-body {
     min-height: auto;
     background: #f4f7fb;
@@ -371,6 +377,36 @@ button {
     min-height: 100vh;
     cursor: wait;
     background: transparent;
+}
+
+.apl-ocr-overlay-shell {
+    position: fixed;
+    inset: 0;
+    cursor: crosshair;
+    user-select: none;
+    background: rgba(7, 12, 20, 0.16);
+}
+
+.apl-ocr-overlay-hint {
+    position: fixed;
+    top: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 7px 12px;
+    border-radius: 10px;
+    background: rgba(16, 25, 38, 0.82);
+    color: #edf3ff;
+    font-size: 0.86rem;
+    line-height: 1.2;
+    pointer-events: none;
+}
+
+.apl-ocr-overlay-selection {
+    position: fixed;
+    border: 2px solid rgba(138, 214, 255, 0.95);
+    background: rgba(138, 214, 255, 0.2);
+    box-shadow: 0 0 0 1px rgba(16, 25, 38, 0.2);
+    pointer-events: none;
 }
 
 .apl-body {
@@ -972,6 +1008,32 @@ button {
     margin-top: 2px;
     color: #445878;
     font-size: 11px;
+}
+
+.apl-settings-ocr-hotkey-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.apl-settings-ocr-hotkey-row input[type='checkbox'] {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    flex: 0 0 auto;
+}
+
+.apl-settings-ocr-hotkey-label {
+    color: #1f2f49;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.apl-settings-ocr-hotkey-row .apl-settings-shortcut-input {
+    flex: 1;
+    width: auto;
+    min-width: 140px;
 }
 
 .apl-settings-section-title {

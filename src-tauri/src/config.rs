@@ -70,9 +70,11 @@ pub struct AppConfig {
     pub enable_lookup: bool,
     pub enable_translate: bool,
     pub enable_audio: bool,
+    pub enable_ocr: bool,
     pub auto_play_audio_mode: String,
     pub popover_trigger_mode: String,
     pub popover_shortcut: String,
+    pub ocr_hotkey: String,
     pub source_language: String,
     pub target_language: String,
     pub quick_translate_source_language: String,
@@ -90,9 +92,11 @@ impl Default for AppConfig {
             enable_lookup: true,
             enable_translate: true,
             enable_audio: true,
+            enable_ocr: true,
             auto_play_audio_mode: "word".to_owned(),
             popover_trigger_mode: "auto".to_owned(),
             popover_shortcut: "Ctrl+Shift+D".to_owned(),
+            ocr_hotkey: "Ctrl+Shift+S".to_owned(),
             source_language: "en".to_owned(),
             target_language: "vi".to_owned(),
             quick_translate_source_language: "auto".to_owned(),
@@ -117,6 +121,7 @@ impl AppConfig {
             next.popover_trigger_mode = "auto".to_owned();
         }
         next.popover_shortcut = sanitize_shortcut(&next.popover_shortcut, "Ctrl+Shift+D", false);
+        next.ocr_hotkey = sanitize_shortcut(&next.ocr_hotkey, "Ctrl+Shift+S", false);
         if next.source_language.is_empty() {
             next.source_language = "en".to_owned();
         }

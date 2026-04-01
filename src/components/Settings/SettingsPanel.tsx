@@ -99,7 +99,7 @@ export function SettingsPanel({ open, settings, onChange }: SettingsPanelProps) 
   const copy = getSettingsCopy(settings.target_language)
 
   const handleShortcutCapture =
-    (field: 'popover_shortcut' | 'hotkey_translate_shortcut') =>
+    (field: 'popover_shortcut' | 'ocr_hotkey' | 'hotkey_translate_shortcut') =>
     (event: KeyboardEvent<HTMLInputElement>) => {
       if (event.key === 'Tab') {
         return
@@ -116,7 +116,12 @@ export function SettingsPanel({ open, settings, onChange }: SettingsPanelProps) 
       const shortcut = buildShortcutFromEvent(event)
       if (!shortcut) {
         if (event.key === 'Shift') {
-          const nextShortcut = field === 'hotkey_translate_shortcut' ? 'Shift' : 'Ctrl+Shift+D'
+          const nextShortcut =
+            field === 'hotkey_translate_shortcut'
+              ? 'Shift'
+              : field === 'ocr_hotkey'
+                ? 'Ctrl+Shift+S'
+                : 'Ctrl+Shift+D'
           onChange(setField(settings, field, nextShortcut))
         }
         return
@@ -197,6 +202,27 @@ export function SettingsPanel({ open, settings, onChange }: SettingsPanelProps) 
 
             <div className="apl-settings-shortcut-group">
               <div className="apl-settings-hint">{copy.shortcutHint}</div>
+            </div>
+
+            <div className="apl-settings-shortcut-group">
+              <div className="apl-settings-hint">{copy.ocrLanguageHint}</div>
+              <label className="apl-settings-ocr-hotkey-row">
+                <input
+                  type="checkbox"
+                  checked={settings.enable_ocr}
+                  onChange={(event) => onChange(setField(settings, 'enable_ocr', event.target.checked))}
+                  aria-label={copy.enableOcr}
+                />
+                <span className="apl-settings-ocr-hotkey-label">{copy.ocrShortcut}</span>
+                <input
+                  className="apl-settings-shortcut-input"
+                  value={settings.ocr_hotkey}
+                  placeholder={copy.shortcutPlaceholder}
+                  readOnly
+                  disabled={!settings.enable_ocr}
+                  onKeyDown={handleShortcutCapture('ocr_hotkey')}
+                />
+              </label>
             </div>
           </div>
 

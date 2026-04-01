@@ -1,11 +1,15 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Position, State};
+use tauri::{
+    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, Position, Size, State,
+};
 
+use crate::automation;
 use crate::config::{self, AppConfig};
 use crate::hotkey;
 use crate::indicator;
+use crate::ocr;
 use crate::selection;
 
 pub struct AppState {
@@ -77,6 +81,38 @@ pub struct ImageSearchResponse {
     pub error: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OcrPayload {
+    pub image_base64: String,
+    pub source: String,
+    pub target: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OcrResponse {
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct HotkeyTraceEvent {
+    stage: String,
+    shortcut: String,
+    detail: String,
+}
+
+const OCR_OVERLAY_WINDOW_LABEL: &str = "ocr-overlay";
+
+fn emit_hotkey_trace(app: &AppHandle, stage: &str, shortcut: &str, detail: String) {
+    let _ = app.emit(
+        "hotkey-trace",
+        HotkeyTraceEvent {
+            stage: stage.to_owned(),
+            shortcut: shortcut.to_owned(),
+            detail,
+        },
+    );
+}
+
 pub async fn translate_via_sidecar(
     client: &Client,
     payload: TranslatePayload,
@@ -129,6 +165,35 @@ async fn search_images_via_sidecar(
         .json::<ImageSearchResponse>()
         .await
         .map_err(|err| format!("sidecar image search decode failed: {err}"))
+}
+
+async fn run_ocr_via_sidecar(client: &Client, payload: OcrPayload) -> Result<OcrResponse, String> {
+    let endpoint = std::env::var("SIDECAR_OCR_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:49152/ocr".to_owned());
+    let response = client
+        .post(endpoint)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|err| format!("sidecar ocr request failed: {err}"))?;
+    response
+        .json::<OcrResponse>()
+        .await
+        .map_err(|err| format!("sidecar ocr decode failed: {err}"))
+}
+
+fn monitor_for_cursor(window: &tauri::WebviewWindow, cursor: (i32, i32)) -> Option<tauri::Monitor> {
+    let monitors = window.available_monitors().ok()?;
+    let (x, y) = cursor;
+    monitors.into_iter().find(|monitor| {
+        let pos = monitor.position();
+        let size = monitor.size();
+        let left = pos.x;
+        let top = pos.y;
+        let right = left + i32::try_from(size.width).unwrap_or(i32::MAX);
+        let bottom = top + i32::try_from(size.height).unwrap_or(i32::MAX);
+        x >= left && x <= right && y >= top && y <= bottom
+    })
 }
 
 #[tauri::command]
@@ -203,6 +268,190 @@ pub fn hide_popover(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn show_loading_indicator(app: AppHandle) -> Result<(), String> {
     indicator::show_hotkey_indicator(&app, None)
+}
+
+#[tauri::command]
+pub fn show_ocr_overlay(app: AppHandle) -> Result<(), String> {
+    let overlay = app
+        .get_webview_window(OCR_OVERLAY_WINDOW_LABEL)
+        .ok_or_else(|| "ocr overlay window not found".to_owned())?;
+
+    let cursor = automation::cursor_position();
+    let monitor = cursor
+        .and_then(|point| monitor_for_cursor(&overlay, point))
+        .or_else(|| overlay.current_monitor().ok().flatten())
+        .or_else(|| app.primary_monitor().ok().flatten());
+
+    if let Some(mon) = &monitor {
+        let size = mon.size();
+        let _ = overlay.set_size(Size::Physical(PhysicalSize::new(size.width, size.height)));
+        let pos = mon.position();
+        let _ = overlay.set_position(Position::Physical(PhysicalPosition::new(pos.x, pos.y)));
+    }
+
+    overlay
+        .show()
+        .map_err(|err| format!("show ocr overlay failed: {err}"))?;
+    overlay
+        .set_focus()
+        .map_err(|err| format!("focus ocr overlay failed: {err}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cancel_ocr_overlay(app: AppHandle) -> Result<(), String> {
+    if let Some(overlay) = app.get_webview_window(OCR_OVERLAY_WINDOW_LABEL) {
+        overlay
+            .hide()
+            .map_err(|err| format!("hide ocr overlay failed: {err}"))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn submit_ocr_selection(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+) -> Result<(), String> {
+    emit_hotkey_trace(
+        &app,
+        "ocr-submit-received",
+        "overlay",
+        format!("logical=({left},{top})-({right},{bottom})"),
+    );
+
+    let overlay = app
+        .get_webview_window(OCR_OVERLAY_WINDOW_LABEL)
+        .ok_or_else(|| "ocr overlay window not found".to_owned())?;
+    let overlay_pos = overlay
+        .outer_position()
+        .map_err(|err| format!("read ocr overlay position failed: {err}"))?;
+    let scale_factor = overlay
+        .scale_factor()
+        .map_err(|err| format!("read ocr overlay scale factor failed: {err}"))?;
+
+    let physical_left = overlay_pos.x + (f64::from(left) * scale_factor).round() as i32;
+    let physical_top = overlay_pos.y + (f64::from(top) * scale_factor).round() as i32;
+    let physical_right = overlay_pos.x + (f64::from(right) * scale_factor).round() as i32;
+    let physical_bottom = overlay_pos.y + (f64::from(bottom) * scale_factor).round() as i32;
+
+    cancel_ocr_overlay(app.clone())?;
+
+    let (ocr_enabled, source_language, target_language) = {
+        let guard = state
+            .config
+            .lock()
+            .map_err(|_| "config lock poisoned".to_owned())?;
+        (
+            guard.enable_ocr,
+            guard.source_language.clone(),
+            guard.target_language.clone(),
+        )
+    };
+    if !ocr_enabled {
+        emit_hotkey_trace(
+            &app,
+            "ocr-submit-skip",
+            "overlay",
+            "ocr disabled".to_owned(),
+        );
+        return Ok(());
+    }
+
+    let Some(region) =
+        ocr::normalize_region(physical_left, physical_top, physical_right, physical_bottom)
+    else {
+        emit_hotkey_trace(
+            &app,
+            "ocr-submit-skip",
+            "overlay",
+            format!(
+                "region too small after physical convert=({physical_left},{physical_top})-({physical_right},{physical_bottom})"
+            ),
+        );
+        return Ok(());
+    };
+
+    emit_hotkey_trace(
+        &app,
+        "ocr-capture-start",
+        "overlay",
+        format!(
+            "physical=({},{})->({},{}) | scale={:.3}",
+            region.left, region.top, region.right, region.bottom, scale_factor
+        ),
+    );
+
+    let anchor = region.center();
+    let _ = indicator::show_hotkey_indicator(&app, Some(anchor));
+
+    let png_base64 =
+        match tauri::async_runtime::spawn_blocking(move || ocr::capture_region_png_base64(region))
+            .await
+        {
+            Ok(Ok(value)) => value,
+            Ok(Err(err)) => {
+                emit_hotkey_trace(&app, "ocr-capture-failed", "overlay", err.clone());
+                return Err(err);
+            }
+            Err(err) => {
+                let message = format!("ocr screenshot task failed: {err}");
+                emit_hotkey_trace(&app, "ocr-capture-failed", "overlay", message.clone());
+                return Err(message);
+            }
+        };
+
+    let ocr_result = run_ocr_via_sidecar(
+        &state.client,
+        OcrPayload {
+            image_base64: png_base64,
+            source: source_language,
+            target: target_language,
+        },
+    )
+    .await;
+
+    let _ = indicator::hide_hotkey_indicator(&app);
+
+    let text = match ocr_result {
+        Ok(result) => result.text.trim().to_owned(),
+        Err(err) => {
+            emit_hotkey_trace(&app, "ocr-sidecar-failed", "overlay", err.clone());
+            return Err(err);
+        }
+    };
+    emit_hotkey_trace(
+        &app,
+        "ocr-sidecar-done",
+        "overlay",
+        format!("textLen={}", text.chars().count()),
+    );
+
+    if text.is_empty() {
+        emit_hotkey_trace(
+            &app,
+            "ocr-empty",
+            "overlay",
+            "sidecar returned empty text".to_owned(),
+        );
+        return Ok(());
+    }
+
+    let result = selection::show_popover_window(&app, text, "shortcut".to_owned(), Some(anchor));
+    match &result {
+        Ok(()) => emit_hotkey_trace(
+            &app,
+            "ocr-popover-shown",
+            "overlay",
+            "selection emitted".to_owned(),
+        ),
+        Err(err) => emit_hotkey_trace(&app, "ocr-popover-failed", "overlay", err.clone()),
+    }
+    result
 }
 
 #[tauri::command]
