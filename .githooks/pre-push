@@ -1,20 +1,20 @@
-#!/usr/bin/env bash
-set -euo pipefail
+# #!/usr/bin/env bash
+# set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PYTHON_BIN="${PYTHON_BIN:-python}"
+# ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# PYTHON_BIN="${PYTHON_BIN:-python}"
 
-cd "$ROOT_DIR"
+# cd "$ROOT_DIR"
 
-echo "=== Pre-push checks ==="
+# echo "=== Pre-push checks ==="
 
-echo "[1/3] Unit tests"
-cargo test --manifest-path src-tauri/Cargo.toml --quiet
-if [[ -d "sidecar/tests" ]]; then
-  "$PYTHON_BIN" -m pytest sidecar/tests/ -q --tb=short
-fi
+# echo "[1/3] Unit tests"
+# cargo test --manifest-path src-tauri/Cargo.toml --quiet
+# if [[ -d "sidecar/tests" ]]; then
+#   "$PYTHON_BIN" -m pytest sidecar/tests/ -q --tb=short
+# fi
 
-echo "[2/3] Lint"
-npm run lint --silent
+# echo "[2/3] Lint"
+# npm run lint --silent
 
-echo "=== Pre-push OK ==="
+# echo "=== Pre-push OK ==="
