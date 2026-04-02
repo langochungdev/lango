@@ -676,6 +676,7 @@ button {
     text-align: left;
     cursor: pointer;
     color: #24324a;
+    background: transparent;
 }
 
 .apl-definition-toggle-icon {
@@ -698,6 +699,24 @@ button {
     display: block;
     text-indent: 0;
     overflow-wrap: anywhere;
+}
+
+@media (hover: hover) {
+    .apl-lookup-definition-toggle:hover {
+        background: transparent;
+    }
+
+    .apl-lookup-definition-toggle:hover .apl-lookup-definition {
+        text-shadow: 0 0 0.45px currentColor, 0 0 0.45px currentColor;
+    }
+}
+
+.apl-lookup-definition-toggle:focus-visible {
+    background: transparent;
+}
+
+.apl-lookup-definition-toggle:focus-visible .apl-lookup-definition {
+    text-shadow: 0 0 0.45px currentColor, 0 0 0.45px currentColor;
 }
 
 .apl-translate-en {
