@@ -109,6 +109,11 @@ export function Popover({ state, selection, dictionary, translation, error, pane
 
   const cleanSelection = normalizeText(selection)
   const selectedText = cleanSelection || 'Selection'
+  const selectedWordCount = useMemo(
+    () => (selectedText ? selectedText.split(/\s+/).filter(Boolean).length : 0),
+    [selectedText],
+  )
+  const isParagraphTranslate = state === 'translate' && selectedWordCount > 1
   const { audioError, playAudio, startAudio, stopAudio } = useAudioPlayer(dictionary, selectedText)
 
   const readPopoverWidth = useCallback(() => {
@@ -150,6 +155,12 @@ export function Popover({ state, selection, dictionary, translation, error, pane
 
   useEffect(() => { setActivePanel(panelMode) }, [panelMode, selection, state])
   useEffect(() => { setBaselinePopoverWidth(null); setLockedPopoverWidth(null) }, [selection])
+  useEffect(() => {
+    if (state === 'idle' || state === 'loading') {
+      autoAudioKeyRef.current = ''
+      stopAudio()
+    }
+  }, [state, stopAudio])
 
   const compactLookupScore = useMemo(() => {
     if (state !== 'lookup' || !dictionary) {
@@ -179,20 +190,32 @@ export function Popover({ state, selection, dictionary, translation, error, pane
     const lookupDensity =
       Math.max(compactLookupScore.header, selectedText.length) +
       Math.ceil(lookupDefinitionDensity * LOOKUP_DEFINITION_DENSITY_WEIGHT)
-    const translateDensity = Math.max(
-      compactTranslateLength,
-      Math.ceil(selectedText.length * 0.8),
-    )
+    const translateDensity = isParagraphTranslate
+      ? Math.max(24, compactTranslateLength)
+      : Math.max(
+          compactTranslateLength,
+          Math.ceil(selectedText.length * 0.8),
+        )
 
     const contentDensity =
       state === 'lookup'
         ? Math.max(lookupDensity, selectedText.length)
         : state === 'translate'
-          ? Math.max(translateDensity, selectedText.length)
+          ? isParagraphTranslate
+            ? translateDensity
+            : Math.max(translateDensity, selectedText.length)
           : selectedText.length
 
+    const widthPadding = isParagraphTranslate
+      ? Math.max(20, POPOVER_BASE_CONTENT_PADDING_PX - 52)
+      : POPOVER_BASE_CONTENT_PADDING_PX
+    const widthCharPx = isParagraphTranslate
+      ? Math.max(5.2, CONTENT_CHAR_WIDTH_PX - 1.8)
+      : CONTENT_CHAR_WIDTH_PX
+    const minWidth = isParagraphTranslate ? 176 : MIN_POPOVER_WIDTH
+
     const estimatedWidth = Math.ceil(
-      POPOVER_BASE_CONTENT_PADDING_PX + contentDensity * CONTENT_CHAR_WIDTH_PX,
+      widthPadding + contentDensity * widthCharPx,
     )
 
     const maxMinWidth =
@@ -200,9 +223,9 @@ export function Popover({ state, selection, dictionary, translation, error, pane
 
     return Math.min(
       maxMinWidth,
-      Math.max(MIN_POPOVER_WIDTH, estimatedWidth),
+      Math.max(minWidth, estimatedWidth),
     )
-  }, [compactLookupScore.definition, compactLookupScore.header, compactTranslateLength, selectedText.length, state])
+  }, [compactLookupScore.definition, compactLookupScore.header, compactTranslateLength, isParagraphTranslate, selectedText.length, state])
 
   const showDetailsPanel = state === 'lookup' && Boolean(dictionary) && activePanel === 'details'
   const showImagePanel = activePanel === 'images'
@@ -353,6 +376,7 @@ export function Popover({ state, selection, dictionary, translation, error, pane
           aria-hidden="true"
           onPointerDown={(event) => {
             if (event.target === event.currentTarget) {
+              stopAudio()
               onRequestClose?.('backdrop-pointerdown')
             }
           }}
@@ -361,7 +385,14 @@ export function Popover({ state, selection, dictionary, translation, error, pane
       )}
 
       {createPortal(
-        <section ref={popoverRef} className="apl-popover" data-testid="popover" role="dialog" aria-modal="true" aria-label="Dictover popover">
+        <section
+          ref={popoverRef}
+          className={`apl-popover${isParagraphTranslate ? ' apl-popover--translate-paragraph' : ''}`}
+          data-testid="popover"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Dictover popover"
+        >
           {state === 'lookup' && dictionary && lookupData && (
             <div className="apl-body apl-lookup-compact">
               <div className="apl-lookup-headerline">
@@ -386,9 +417,12 @@ export function Popover({ state, selection, dictionary, translation, error, pane
           )}
 
           {state === 'translate' && translation && (
-            <div className="apl-body apl-translate-compact">
+            <div className={`apl-body apl-translate-compact${isParagraphTranslate ? ' apl-translate-compact--paragraph' : ''}`}>
               <div className="apl-translate-vi apl-translate-vi--primary">{translationLines.length > 0 ? translationLines.join(' ') : normalizeText(sanitizeMarkup(translation.result))}</div>
-              <div className="apl-inline-actions apl-translate-inline-actions">
+              <div className={`apl-inline-actions apl-translate-inline-actions${isParagraphTranslate ? ' apl-translate-inline-actions--floating' : ''}`}>
+                {isParagraphTranslate && (
+                  <button type="button" className="apl-button apl-audio apl-audio-mini" aria-label="Play audio" onClick={() => void playAudio()}><AudioIcon /></button>
+                )}
                   <button type="button" className={`apl-button apl-image-toggle ${showImagePanel ? 'apl-image-toggle--active' : ''}`} aria-label="Open image panel" aria-pressed={showImagePanel} onClick={() => togglePanel('images')}><ImageIcon /></button>
                 <button type="button" className="apl-button apl-popover-settings" aria-label="Open settings" onClick={onOpenSettings} disabled={!onOpenSettings}><SettingsIcon /></button>
               </div>
