@@ -7,6 +7,7 @@ use tauri::{
 
 use crate::automation;
 use crate::config::{self, AppConfig};
+use crate::debug_trace;
 use crate::hotkey;
 use crate::indicator;
 use crate::ocr;
@@ -103,6 +104,10 @@ struct HotkeyTraceEvent {
 const OCR_OVERLAY_WINDOW_LABEL: &str = "ocr-overlay";
 
 fn emit_hotkey_trace(app: &AppHandle, stage: &str, shortcut: &str, detail: String) {
+    if !debug_trace::enabled() {
+        return;
+    }
+
     let _ = app.emit(
         "hotkey-trace",
         HotkeyTraceEvent {

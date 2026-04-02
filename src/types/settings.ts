@@ -26,6 +26,7 @@ export interface AppSettings {
   popover_open_panel_mode: PopoverOpenPanelMode;
   popover_definition_language_mode: PopoverDefinitionLanguageMode;
   hotkey_translate_shortcut: string;
+  hotkey_translate_ctrl_enter_send: boolean;
 }
 
 function isValidModifier(token: string): boolean {
@@ -119,6 +120,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   popover_open_panel_mode: "none",
   popover_definition_language_mode: "output",
   hotkey_translate_shortcut: "Shift",
+  hotkey_translate_ctrl_enter_send: false,
 };
 
 export function sanitizeSettings(partial: Partial<AppSettings>): AppSettings {
@@ -181,5 +183,7 @@ export function sanitizeSettings(partial: Partial<AppSettings>): AppSettings {
     popover_open_panel_mode: panelMode,
     popover_definition_language_mode: languageMode,
     hotkey_translate_shortcut: hotkeyTranslateShortcut,
+    hotkey_translate_ctrl_enter_send:
+      merged.hotkey_translate_ctrl_enter_send === true,
   };
 }

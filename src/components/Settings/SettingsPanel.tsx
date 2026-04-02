@@ -307,6 +307,23 @@ export function SettingsPanel({ open, settings, onChange }: SettingsPanelProps) 
                 onKeyDown={handleShortcutCapture('hotkey_translate_shortcut')}
               />
             </label>
+
+            <label className="apl-settings-toggle-row" role="group" aria-label={copy.quickCtrlEnterTranslateSend}>
+              <input
+                type="checkbox"
+                checked={settings.hotkey_translate_ctrl_enter_send}
+                onChange={(event) =>
+                  onChange(
+                    setField(
+                      settings,
+                      'hotkey_translate_ctrl_enter_send',
+                      event.target.checked,
+                    ),
+                  )
+                }
+              />
+              <span>{copy.quickCtrlEnterTranslateSend}</span>
+            </label>
           </div>
         </div>
       </div>

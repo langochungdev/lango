@@ -3,6 +3,7 @@
 mod automation;
 mod bridge;
 mod config;
+mod debug_trace;
 mod hotkey;
 mod indicator;
 mod ocr;

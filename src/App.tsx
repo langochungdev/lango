@@ -9,7 +9,12 @@ import { SettingsPanel } from '@/components/Settings/SettingsPanel'
 import { getSettingsCopy } from '@/constants/settingsI18n'
 import { usePopover, type PopoverState } from '@/hooks/usePopover'
 import { loadSettings, saveSettings } from '@/services/config'
-import { appendDebugLog, clearDebugLogs, copyDebugLogsToClipboard } from '@/services/debugLog'
+import {
+  appendDebugLog,
+  clearDebugLogs,
+  copyDebugLogsToClipboard,
+  isDebugTraceEnabled,
+} from '@/services/debugLog'
 import type { DictionaryResult } from '@/services/dictionary'
 import type { TranslateResult } from '@/services/translate'
 import type { SelectionAnchor } from '@/types/selectionAnchor'
@@ -58,6 +63,7 @@ const IS_HOTKEY_INDICATOR_WINDOW = WINDOW_MODE === 'hotkey-indicator'
 const IS_OCR_OVERLAY_WINDOW = WINDOW_MODE === 'ocr-overlay'
 const IS_DEBUG_LOG_WINDOW = WINDOW_MODE === 'debug-log'
 const IS_PREVIEW_WINDOW = WINDOW_MODE === 'preview' || PREVIEW_MODE
+const DEBUG_TRACE_ENABLED = isDebugTraceEnabled()
 
 const MOCK_DICTIONARY: DictionaryResult = {
   word: 'mindset',
@@ -632,7 +638,9 @@ function PopoverWindow() {
         cleanupHotkeyTrace = null
       }
     }
-    void setupDebugHotkeys()
+    if (DEBUG_TRACE_ENABLED) {
+      void setupDebugHotkeys()
+    }
 
     const onKeydown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -641,6 +649,10 @@ function PopoverWindow() {
       }
 
       if (hasTauriBridge) {
+        return
+      }
+
+      if (!DEBUG_TRACE_ENABLED) {
         return
       }
 

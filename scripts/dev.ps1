@@ -5,6 +5,53 @@ $PythonBin = if ($env:PYTHON_BIN) { $env:PYTHON_BIN } else { "python" }
 $SidecarPort = if ($env:SIDECAR_PORT) { $env:SIDECAR_PORT } else { "49152" }
 
 $sidecarProc = $null
+$sidecarStartedByScript = $false
+
+function Test-PortInUse {
+  param([int]$Port)
+
+  try {
+    $listeners = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop
+    return $listeners.Count -gt 0
+  }
+  catch {
+    return $false
+  }
+}
+
+function Test-PortBindable {
+  param([int]$Port)
+
+  $listener = $null
+  try {
+    $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $Port)
+    $listener.Start()
+    return $true
+  }
+  catch {
+    return $false
+  }
+  finally {
+    if ($null -ne $listener) {
+      try {
+        $listener.Stop()
+      }
+      catch {
+      }
+    }
+  }
+}
+
+function Get-FreeTcpPort {
+  $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+  try {
+    $listener.Start()
+    return $listener.LocalEndpoint.Port
+  }
+  finally {
+    $listener.Stop()
+  }
+}
 
 function Remove-GitUsrBinFromPath {
   $entries = $env:Path -split ";"
@@ -101,18 +148,33 @@ try {
   Write-Host "[1/3] Start Python sidecar"
   Set-Location (Join-Path $RootDir "sidecar")
   & $PythonBin -m pip install -r requirements.txt
-  $sidecarProc = Start-Process -FilePath $PythonBin -ArgumentList @("-m", "uvicorn", "main:app", "--port", $SidecarPort, "--reload") -PassThru -NoNewWindow
+
+  $effectiveSidecarPort = [int]$SidecarPort
+  if (Test-PortInUse -Port $effectiveSidecarPort) {
+    Write-Host "  Port $SidecarPort dang duoc su dung, se tai su dung sidecar hien co."
+  }
+  else {
+    if (-not (Test-PortBindable -Port $effectiveSidecarPort)) {
+      $effectiveSidecarPort = Get-FreeTcpPort
+      Write-Host "  Port $SidecarPort khong bind duoc, chuyen sang port $effectiveSidecarPort."
+    }
+
+    $sidecarProc = Start-Process -FilePath $PythonBin -ArgumentList @("-m", "uvicorn", "main:app", "--port", "$effectiveSidecarPort", "--reload") -PassThru -NoNewWindow
+    $sidecarStartedByScript = $true
+  }
 
   Write-Host "[2/3] Install frontend deps"
   Set-Location $RootDir
   npm install
 
   Write-Host "[3/3] Start Tauri dev"
-  $env:SIDECAR_PORT = $SidecarPort
+  $env:SIDECAR_PORT = "$effectiveSidecarPort"
+  $env:DICTOVER_ENABLE_DEBUG_TRACE = "1"
+  $env:VITE_DEBUG_TRACE = "1"
   npm run tauri dev
 }
 finally {
-  if ($null -ne $sidecarProc -and -not $sidecarProc.HasExited) {
+  if ($sidecarStartedByScript -and $null -ne $sidecarProc -and -not $sidecarProc.HasExited) {
     Stop-Process -Id $sidecarProc.Id -Force
   }
 }

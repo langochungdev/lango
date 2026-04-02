@@ -8,6 +8,7 @@ use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use crate::automation;
 use crate::bridge::{self, AppState, TranslatePayload};
 use crate::config::AppConfig;
+use crate::debug_trace;
 use crate::indicator;
 use crate::selection;
 
@@ -40,6 +41,10 @@ static HOTKEY_TRANSLATE_SEQ: AtomicU64 = AtomicU64::new(0);
 static HOTKEY_TRANSLATE_CANCELLED_SEQ: AtomicU64 = AtomicU64::new(0);
 
 fn emit_hotkey_trace(app: &AppHandle, stage: &str, shortcut: &str, detail: String) {
+    if !debug_trace::enabled() {
+        return;
+    }
+
     let _ = app.emit(
         "hotkey-trace",
         HotkeyTraceEvent {
@@ -155,6 +160,17 @@ fn normalize_shortcut(shortcut: &str) -> String {
     }
 
     canonical.join("+")
+}
+
+fn is_ctrl_enter_shortcut(shortcut: &str) -> bool {
+    matches!(
+        normalize_shortcut(shortcut).as_str(),
+        "ctrl+enter" | "ctrl+return"
+    )
+}
+
+pub fn should_use_ctrl_enter_grab(config: &AppConfig) -> bool {
+    config.hotkey_translate_ctrl_enter_send
 }
 
 fn is_valid_modifier(token: &str) -> bool {
@@ -285,6 +301,8 @@ pub fn register_hotkeys(app: &AppHandle, config: &AppConfig) -> Result<(), Strin
         DEFAULT_TRANSLATE_SHORTCUT,
         true,
     );
+    let translate_is_ctrl_enter = is_ctrl_enter_shortcut(&translate_shortcut);
+    let should_grab_ctrl_enter = should_use_ctrl_enter_grab(config) && translate_is_ctrl_enter;
     let manager = app.global_shortcut();
 
     manager
@@ -307,7 +325,9 @@ pub fn register_hotkeys(app: &AppHandle, config: &AppConfig) -> Result<(), Strin
         "disabled".to_owned()
     };
 
-    let translate_state_text = if !is_modifier_only_shortcut(&translate_shortcut)
+    let translate_state_text = if should_grab_ctrl_enter {
+        format!("grabbed:{translate_shortcut}")
+    } else if !is_modifier_only_shortcut(&translate_shortcut)
         && normalize_shortcut(&popover_shortcut) != normalize_shortcut(&translate_shortcut)
         && normalize_shortcut(&ocr_shortcut) != normalize_shortcut(&translate_shortcut)
     {
@@ -499,6 +519,43 @@ pub async fn handle_modifier_shortcut(app: AppHandle) -> Result<(), String> {
     result
 }
 
+pub async fn handle_ctrl_enter_intercepted(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let config = {
+        let guard = state
+            .config
+            .lock()
+            .map_err(|_| "config lock poisoned".to_owned())?;
+        guard.clone()
+    };
+
+    if !config.hotkey_translate_ctrl_enter_send {
+        emit_hotkey_trace(
+            &app,
+            "ctrl-enter-intercept-skip",
+            "Ctrl+Enter",
+            "reason=setting-disabled".to_owned(),
+        );
+        return Ok(());
+    }
+
+    emit_hotkey_trace(
+        &app,
+        "ctrl-enter-intercept-triggered",
+        "Ctrl+Enter",
+        format!(
+            "configuredTranslateShortcut={}",
+            normalize_shortcut(&effective_shortcut(
+                &config.hotkey_translate_shortcut,
+                DEFAULT_TRANSLATE_SHORTCUT,
+                true,
+            ))
+        ),
+    );
+
+    on_translate_replace_triggered(app, config, "Ctrl+Enter".to_owned()).await
+}
+
 async fn capture_active_document_text_stable() -> Result<String, String> {
     for attempt in 0..HOTKEY_CAPTURE_MAX_ATTEMPTS {
         let wait_ms = HOTKEY_CAPTURE_SETTLE_MS + HOTKEY_RETRY_DELAY_MS * u64::from(attempt);
@@ -569,6 +626,7 @@ async fn on_translate_replace_triggered(
     shortcut: String,
 ) -> Result<(), String> {
     let request_id = begin_hotkey_translate_request();
+    let ctrl_enter_send_enabled = config.hotkey_translate_ctrl_enter_send;
 
     let cursor = tauri::async_runtime::spawn_blocking(automation::cursor_position)
         .await
@@ -576,36 +634,115 @@ async fn on_translate_replace_triggered(
         .flatten();
 
     let started_at = Instant::now();
+    emit_hotkey_trace(
+        &app,
+        "translate-flow-begin",
+        &shortcut,
+        format!(
+            "requestId={request_id} ctrlEnterSendEnabled={ctrl_enter_send_enabled} isCtrlEnterShortcut={}",
+            is_ctrl_enter_shortcut(&shortcut)
+        ),
+    );
 
     let result = async {
         if is_hotkey_translate_cancelled(request_id) {
+            emit_hotkey_trace(
+                &app,
+                "translate-cancelled",
+                &shortcut,
+                format!("requestId={request_id} stage=before-capture"),
+            );
             return Ok::<Option<(String, String)>, String>(None);
         }
 
         let state = app.state::<AppState>();
+        emit_hotkey_trace(
+            &app,
+            "translate-capture-start",
+            &shortcut,
+            format!("requestId={request_id}"),
+        );
         let original = capture_active_document_text_stable().await?;
 
         let source_text = original.replace('\r', "");
+        emit_hotkey_trace(
+            &app,
+            "translate-capture-done",
+            &shortcut,
+            format!(
+                "requestId={request_id} textLen={} trimmedLen={}",
+                source_text.chars().count(),
+                source_text.trim().chars().count()
+            ),
+        );
         if source_text.trim().is_empty() {
+            emit_hotkey_trace(
+                &app,
+                "translate-noop",
+                &shortcut,
+                format!("requestId={request_id} reason=empty-source"),
+            );
             return Ok::<Option<(String, String)>, String>(None);
         }
 
         if is_hotkey_translate_cancelled(request_id) {
+            emit_hotkey_trace(
+                &app,
+                "translate-cancelled",
+                &shortcut,
+                format!("requestId={request_id} stage=after-capture"),
+            );
             return Ok::<Option<(String, String)>, String>(None);
         }
 
         if let Some((last_orig, last_trans)) = get_last_translation() {
             if source_text == last_trans {
                 if is_hotkey_translate_cancelled(request_id) {
+                    emit_hotkey_trace(
+                        &app,
+                        "translate-cancelled",
+                        &shortcut,
+                        format!("requestId={request_id} stage=cache-revert"),
+                    );
                     return Ok::<Option<(String, String)>, String>(None);
                 }
+                emit_hotkey_trace(
+                    &app,
+                    "translate-cache-hit",
+                    &shortcut,
+                    format!("requestId={request_id} mode=revert-to-original"),
+                );
                 replace_active_document_text_stable(last_orig.clone()).await?;
+                emit_hotkey_trace(
+                    &app,
+                    "translate-replace-done",
+                    &shortcut,
+                    format!("requestId={request_id} mode=cache-revert"),
+                );
                 return Ok(Some((last_trans, last_orig)));
             } else if source_text == last_orig {
                 if is_hotkey_translate_cancelled(request_id) {
+                    emit_hotkey_trace(
+                        &app,
+                        "translate-cancelled",
+                        &shortcut,
+                        format!("requestId={request_id} stage=cache-apply"),
+                    );
                     return Ok::<Option<(String, String)>, String>(None);
                 }
+                emit_hotkey_trace(
+                    &app,
+                    "translate-cache-hit",
+                    &shortcut,
+                    format!("requestId={request_id} mode=apply-cached-translation"),
+                );
                 replace_active_document_text_stable(last_trans.clone()).await?;
+                emit_hotkey_trace(
+                    &app,
+                    "translate-replace-done",
+                    &shortcut,
+                    format!("requestId={request_id} mode=cache-apply"),
+                );
                 return Ok(Some((last_orig, last_trans)));
             }
         }
@@ -616,24 +753,88 @@ async fn on_translate_replace_triggered(
             target: config.quick_translate_target_language.clone(),
         };
 
+        emit_hotkey_trace(
+            &app,
+            "translate-sidecar-start",
+            &shortcut,
+            format!(
+                "requestId={request_id} textLen={}",
+                source_text.chars().count()
+            ),
+        );
+        let sidecar_started_at = Instant::now();
         let _ = indicator::show_hotkey_indicator(&app, cursor);
         let response = bridge::translate_via_sidecar(&state.client, payload).await?;
         let _ = indicator::hide_hotkey_indicator(&app);
+        emit_hotkey_trace(
+            &app,
+            "translate-sidecar-done",
+            &shortcut,
+            format!(
+                "requestId={request_id} elapsedMs={} rawResultLen={}",
+                sidecar_started_at.elapsed().as_millis(),
+                response.result.chars().count()
+            ),
+        );
 
         if is_hotkey_translate_cancelled(request_id) {
+            emit_hotkey_trace(
+                &app,
+                "translate-cancelled",
+                &shortcut,
+                format!("requestId={request_id} stage=after-sidecar"),
+            );
             return Ok::<Option<(String, String)>, String>(None);
         }
 
         let translated = sanitize_translation_text(&response.result);
+        emit_hotkey_trace(
+            &app,
+            "translate-sanitize-done",
+            &shortcut,
+            format!(
+                "requestId={request_id} translatedLen={} trimmedLen={}",
+                translated.chars().count(),
+                translated.trim().chars().count()
+            ),
+        );
         if translated.trim().is_empty() {
+            emit_hotkey_trace(
+                &app,
+                "translate-noop",
+                &shortcut,
+                format!("requestId={request_id} reason=empty-translation"),
+            );
             return Ok::<Option<(String, String)>, String>(None);
         }
 
         if is_hotkey_translate_cancelled(request_id) {
+            emit_hotkey_trace(
+                &app,
+                "translate-cancelled",
+                &shortcut,
+                format!("requestId={request_id} stage=before-replace"),
+            );
             return Ok::<Option<(String, String)>, String>(None);
         }
 
+        emit_hotkey_trace(
+            &app,
+            "translate-replace-start",
+            &shortcut,
+            format!(
+                "requestId={request_id} sourceLen={} translatedLen={}",
+                source_text.chars().count(),
+                translated.chars().count()
+            ),
+        );
         replace_active_document_text_stable(translated.clone()).await?;
+        emit_hotkey_trace(
+            &app,
+            "translate-replace-done",
+            &shortcut,
+            format!("requestId={request_id} mode=fresh-translation"),
+        );
         set_last_translation(source_text.clone(), translated.clone());
 
         Ok(Some((source_text, translated)))
@@ -641,15 +842,62 @@ async fn on_translate_replace_triggered(
     .await?;
 
     if let Some((orig, trans)) = result {
+        emit_hotkey_trace(
+            &app,
+            "translate-result-ready",
+            &shortcut,
+            format!(
+                "requestId={request_id} originalLen={} translatedLen={} elapsedMs={}",
+                orig.chars().count(),
+                trans.chars().count(),
+                started_at.elapsed().as_millis()
+            ),
+        );
+
+        if config.hotkey_translate_ctrl_enter_send && is_ctrl_enter_shortcut(&shortcut) {
+            emit_hotkey_trace(
+                &app,
+                "translate-send-enter-start",
+                &shortcut,
+                format!("requestId={request_id} waitBeforeEnterMs={HOTKEY_CAPTURE_SETTLE_MS}"),
+            );
+            tauri::async_runtime::spawn_blocking(|| {
+                std::thread::sleep(Duration::from_millis(HOTKEY_CAPTURE_SETTLE_MS));
+                automation::press_enter_key()
+            })
+            .await
+            .map_err(|err| format!("press enter task failed: {err}"))??;
+
+            emit_hotkey_trace(
+                &app,
+                "translate-send-enter-done",
+                &shortcut,
+                format!(
+                    "requestId={request_id} triggeredEnterAfterTranslation=true elapsedMs={}",
+                    started_at.elapsed().as_millis()
+                ),
+            );
+        }
+
         let event = HotkeyTranslationEvent {
             original: orig,
             translated: trans,
             source: config.quick_translate_source_language,
             target: config.quick_translate_target_language,
-            shortcut,
+            shortcut: shortcut.clone(),
         };
         app.emit_to("main", "hotkey-translated", event)
             .map_err(|err| format!("emit hotkey event failed: {err}"))?;
+    } else {
+        emit_hotkey_trace(
+            &app,
+            "translate-flow-no-result",
+            &shortcut,
+            format!(
+                "requestId={request_id} elapsedMs={}",
+                started_at.elapsed().as_millis()
+            ),
+        );
     }
 
     let remaining =
@@ -661,6 +909,15 @@ async fn on_translate_replace_triggered(
         .await;
     }
     let _ = indicator::hide_hotkey_indicator(&app);
+    emit_hotkey_trace(
+        &app,
+        "translate-flow-end",
+        &shortcut,
+        format!(
+            "requestId={request_id} elapsedMs={}",
+            started_at.elapsed().as_millis()
+        ),
+    );
     Ok(())
 }
 

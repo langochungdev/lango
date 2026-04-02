@@ -11,7 +11,15 @@ use windows::Win32::UI::WindowsAndMessaging::{GetMessageW, MSG, WINEVENT_OUTOFCO
 
 use crate::automation;
 use crate::bridge::AppState;
+use crate::debug_trace;
 use crate::hotkey;
+
+#[derive(Debug, Clone, Serialize)]
+struct HotkeyTraceEvent {
+    stage: String,
+    shortcut: String,
+    detail: String,
+}
 
 struct AutoSelectionState {
     last_text: String,
@@ -40,6 +48,7 @@ struct NavigationHotkeyState {
     alt_pressed: bool,
     ctrl_pressed: bool,
     meta_pressed: bool,
+    shift_pressed: bool,
 }
 
 static AUTO_SELECTION_STATE: OnceLock<Mutex<AutoSelectionState>> = OnceLock::new();
@@ -47,6 +56,7 @@ static PENDING_SELECTION_EVENT: OnceLock<Mutex<Option<SelectionEvent>>> = OnceLo
 static MODIFIER_HOTKEY_STATE: OnceLock<Mutex<ModifierHotkeyState>> = OnceLock::new();
 static MOUSE_SELECTION_STATE: OnceLock<Mutex<MouseSelectionState>> = OnceLock::new();
 static NAVIGATION_HOTKEY_STATE: OnceLock<Mutex<NavigationHotkeyState>> = OnceLock::new();
+static CTRL_ENTER_INTERCEPT_ACTIVE: AtomicBool = AtomicBool::new(false);
 static SELECTION_EVENT_SEQ: OnceLock<AtomicU64> = OnceLock::new();
 #[cfg(target_os = "windows")]
 static DESKTOP_SWITCH_APP: OnceLock<AppHandle> = OnceLock::new();
@@ -64,6 +74,21 @@ const POPOVER_BASE_HEIGHT: f64 = 72.0;
 const CURSOR_GAP: i32 = 10;
 const CURSOR_ABOVE_EXTRA_GAP_MAX: i32 = 6;
 const CURSOR_ABOVE_NEAR_BOTTOM_RATIO: f32 = 0.22;
+
+fn emit_hotkey_trace(app: &AppHandle, stage: &str, shortcut: &str, detail: String) {
+    if !debug_trace::enabled() {
+        return;
+    }
+
+    let _ = app.emit(
+        "hotkey-trace",
+        HotkeyTraceEvent {
+            stage: stage.to_owned(),
+            shortcut: shortcut.to_owned(),
+            detail,
+        },
+    );
+}
 
 fn auto_selection_state() -> &'static Mutex<AutoSelectionState> {
     AUTO_SELECTION_STATE.get_or_init(|| {
@@ -110,6 +135,7 @@ fn navigation_hotkey_state() -> &'static Mutex<NavigationHotkeyState> {
             alt_pressed: false,
             ctrl_pressed: false,
             meta_pressed: false,
+            shift_pressed: false,
         })
     })
 }
@@ -275,6 +301,10 @@ fn on_modifier_hotkey_event(app: &AppHandle, event_type: &rdev::EventType) {
 }
 
 fn on_debug_copy_hotkey_event(app: &AppHandle, event_type: &rdev::EventType) {
+    if !debug_trace::enabled() {
+        return;
+    }
+
     match event_type {
         rdev::EventType::KeyPress(rdev::Key::F8) => {
             let _ = app.emit("debug-copy-hotkey", "f8");
@@ -302,6 +332,127 @@ fn is_horizontal_arrow(key: rdev::Key) -> bool {
     matches!(key, rdev::Key::LeftArrow | rdev::Key::RightArrow)
 }
 
+fn is_ctrl_enter_key(key: rdev::Key) -> bool {
+    matches!(key, rdev::Key::Return | rdev::Key::KpReturn)
+}
+
+fn on_ctrl_enter_translate_event(app: &AppHandle, event_type: &rdev::EventType) -> bool {
+    match event_type {
+        rdev::EventType::KeyPress(key) if is_ctrl_enter_key(*key) => {
+            let (ctrl_pressed, alt_pressed, meta_pressed, shift_pressed, plain_ctrl_enter) = {
+                let Ok(guard) = navigation_hotkey_state().lock() else {
+                    return false;
+                };
+                let plain = guard.ctrl_pressed
+                    && !guard.alt_pressed
+                    && !guard.meta_pressed
+                    && !guard.shift_pressed;
+                (
+                    guard.ctrl_pressed,
+                    guard.alt_pressed,
+                    guard.meta_pressed,
+                    guard.shift_pressed,
+                    plain,
+                )
+            };
+
+            emit_hotkey_trace(
+                app,
+                "ctrl-enter-keypress",
+                "Ctrl+Enter",
+                format!(
+                    "ctrl={ctrl_pressed} alt={alt_pressed} meta={meta_pressed} shift={shift_pressed} plain={plain_ctrl_enter} interceptActive={}",
+                    CTRL_ENTER_INTERCEPT_ACTIVE.load(Ordering::SeqCst)
+                ),
+            );
+
+            if !plain_ctrl_enter {
+                return false;
+            }
+            if is_any_app_window_focused(app) {
+                emit_hotkey_trace(
+                    app,
+                    "ctrl-enter-pass",
+                    "Ctrl+Enter",
+                    "reason=app-window-focused".to_owned(),
+                );
+                return false;
+            }
+
+            let state = app.state::<AppState>();
+            let (should_intercept, ctrl_enter_send_enabled) = {
+                let Ok(guard) = state.config.lock() else {
+                    emit_hotkey_trace(
+                        app,
+                        "ctrl-enter-pass",
+                        "Ctrl+Enter",
+                        "reason=config-lock-failed".to_owned(),
+                    );
+                    return false;
+                };
+                (
+                    hotkey::should_use_ctrl_enter_grab(&guard),
+                    guard.hotkey_translate_ctrl_enter_send,
+                )
+            };
+
+            emit_hotkey_trace(
+                app,
+                "ctrl-enter-config",
+                "Ctrl+Enter",
+                format!(
+                    "shouldIntercept={should_intercept} ctrlEnterSendEnabled={ctrl_enter_send_enabled}"
+                ),
+            );
+
+            if !should_intercept {
+                emit_hotkey_trace(
+                    app,
+                    "ctrl-enter-pass",
+                    "Ctrl+Enter",
+                    "reason=setting-disabled".to_owned(),
+                );
+                return false;
+            }
+
+            if !CTRL_ENTER_INTERCEPT_ACTIVE.swap(true, Ordering::SeqCst) {
+                emit_hotkey_trace(
+                    app,
+                    "ctrl-enter-block",
+                    "Ctrl+Enter",
+                    "blockedOriginalEnter=true dispatch=translate-replace".to_owned(),
+                );
+                let app_for_task = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = hotkey::handle_ctrl_enter_intercepted(app_for_task).await;
+                });
+            } else {
+                emit_hotkey_trace(
+                    app,
+                    "ctrl-enter-block-repeat",
+                    "Ctrl+Enter",
+                    "blockedOriginalEnter=true while active request".to_owned(),
+                );
+            }
+
+            true
+        }
+        rdev::EventType::KeyRelease(key) if is_ctrl_enter_key(*key) => {
+            let was_active = CTRL_ENTER_INTERCEPT_ACTIVE.swap(false, Ordering::SeqCst);
+            if was_active {
+                emit_hotkey_trace(
+                    app,
+                    "ctrl-enter-release",
+                    "Ctrl+Enter",
+                    "interceptActive=false".to_owned(),
+                );
+            }
+            was_active
+        }
+        _ => false,
+    }
+}
+
 fn on_navigation_hotkey_event(app: &AppHandle, event_type: &rdev::EventType) {
     let mut should_hide_popover = false;
 
@@ -316,6 +467,9 @@ fn on_navigation_hotkey_event(app: &AppHandle, event_type: &rdev::EventType) {
             }
             if is_ctrl_key(*key) {
                 guard.ctrl_pressed = true;
+            }
+            if is_shift_key(*key) {
+                guard.shift_pressed = true;
             }
             if is_meta_key(*key) {
                 guard.meta_pressed = true;
@@ -341,8 +495,15 @@ fn on_navigation_hotkey_event(app: &AppHandle, event_type: &rdev::EventType) {
             if is_ctrl_key(*key) {
                 guard.ctrl_pressed = false;
             }
+            if is_shift_key(*key) {
+                guard.shift_pressed = false;
+            }
             if is_meta_key(*key) {
                 guard.meta_pressed = false;
+            }
+
+            if !guard.ctrl_pressed {
+                CTRL_ENTER_INTERCEPT_ACTIVE.store(false, Ordering::SeqCst);
             }
         }
         _ => {}
@@ -463,15 +624,22 @@ pub fn start_selection_listener(app: AppHandle) {
             on_navigation_hotkey_event(&app_for_listener, &event.event_type);
             check_global_outside_click(&app_for_listener, &event.event_type);
 
+            let should_block = on_ctrl_enter_translate_event(&app_for_listener, &event.event_type);
+
             if should_trigger_auto_selection(&event) {
                 let app_for_task = app_for_listener.clone();
                 tauri::async_runtime::spawn(async move {
                     let _ = on_auto_selection(app_for_task).await;
                 });
             }
+            if should_block {
+                None
+            } else {
+                Some(event)
+            }
         };
 
-        if let Err(err) = rdev::listen(callback) {
+        if let Err(err) = rdev::grab(callback) {
             eprintln!("selection listener error: {err:?}");
         }
     });

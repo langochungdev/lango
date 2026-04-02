@@ -97,6 +97,14 @@ pub fn replace_active_document_text(replacement: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub fn press_enter_key() -> Result<(), String> {
+    let mut enigo = new_enigo()?;
+    enigo
+        .key(Key::Return, Direction::Click)
+        .map_err(|err| format!("press enter failed: {err}"))?;
+    Ok(())
+}
+
 pub fn cursor_position() -> Option<(i32, i32)> {
     let enigo = new_enigo().ok()?;
     enigo.location().ok()

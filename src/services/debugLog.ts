@@ -12,6 +12,15 @@ const LOG_KEY = "dictover-debug-log";
 const MAX_LOG_COUNT = 300;
 const LOG_UPDATED_EVENT = "dictover-debug-log-updated";
 const LOG_BROADCAST_CHANNEL = "dictover-debug-log-channel";
+const DEBUG_TRACE_ENABLED =
+  import.meta.env.DEV &&
+  ["1", "true", "yes", "on"].includes(
+    (import.meta.env.VITE_DEBUG_TRACE ?? "").trim().toLowerCase(),
+  );
+
+export function isDebugTraceEnabled(): boolean {
+  return DEBUG_TRACE_ENABLED;
+}
 
 function createBroadcastChannel(): BroadcastChannel | null {
   if (typeof window === "undefined") {
@@ -24,6 +33,10 @@ function createBroadcastChannel(): BroadcastChannel | null {
 }
 
 function notifyLogUpdated(source: string): void {
+  if (!DEBUG_TRACE_ENABLED) {
+    return;
+  }
+
   if (typeof window === "undefined") {
     return;
   }
@@ -53,6 +66,10 @@ function safeParse(raw: string | null): DebugLogEntry[] {
 }
 
 export function readDebugLogs(): DebugLogEntry[] {
+  if (!DEBUG_TRACE_ENABLED) {
+    return [];
+  }
+
   if (typeof window === "undefined") {
     return [];
   }
@@ -60,6 +77,10 @@ export function readDebugLogs(): DebugLogEntry[] {
 }
 
 export function clearDebugLogs(): void {
+  if (!DEBUG_TRACE_ENABLED) {
+    return;
+  }
+
   if (typeof window === "undefined") {
     return;
   }
@@ -80,6 +101,10 @@ export function appendDebugLog(
     detail,
   };
 
+  if (!DEBUG_TRACE_ENABLED) {
+    return entry;
+  }
+
   if (typeof window === "undefined") {
     return entry;
   }
@@ -93,6 +118,12 @@ export function appendDebugLog(
 }
 
 export function subscribeDebugLogUpdates(onChange: () => void): () => void {
+  if (!DEBUG_TRACE_ENABLED) {
+    return () => {
+      return;
+    };
+  }
+
   if (typeof window === "undefined") {
     return () => {
       return;
@@ -145,6 +176,10 @@ export function formatDebugLogs(entries: DebugLogEntry[]): string {
 }
 
 export async function copyDebugLogsToClipboard(): Promise<boolean> {
+  if (!DEBUG_TRACE_ENABLED) {
+    return false;
+  }
+
   const text = formatDebugLogs(readDebugLogs());
   if (!text.trim()) {
     return false;
@@ -154,7 +189,9 @@ export async function copyDebugLogsToClipboard(): Promise<boolean> {
     try {
       await navigator.clipboard.writeText(text);
       return true;
-    } catch {}
+    } catch {
+      /* empty */
+    }
   }
 
   if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {

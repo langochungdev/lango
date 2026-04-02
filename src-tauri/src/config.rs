@@ -84,6 +84,7 @@ pub struct AppConfig {
     pub popover_open_panel_mode: String,
     pub popover_definition_language_mode: String,
     pub hotkey_translate_shortcut: String,
+    pub hotkey_translate_ctrl_enter_send: bool,
 }
 
 impl Default for AppConfig {
@@ -106,6 +107,7 @@ impl Default for AppConfig {
             popover_open_panel_mode: "none".to_owned(),
             popover_definition_language_mode: "output".to_owned(),
             hotkey_translate_shortcut: "Shift".to_owned(),
+            hotkey_translate_ctrl_enter_send: false,
         }
     }
 }

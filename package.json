@@ -6,6 +6,7 @@
   "scripts": {
     "dev:desktop:win": "powershell -ExecutionPolicy Bypass -File scripts/dev.ps1",
     "build:installer:win": "powershell -ExecutionPolicy Bypass -File scripts/build-installer.ps1",
+    "build:installer:win:full": "powershell -ExecutionPolicy Bypass -File scripts/build-installer.ps1 -Full",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",

@@ -41,6 +41,7 @@ export interface SettingsCopy {
   quickTranslateShortcut: string;
   quickInputLanguage: string;
   quickOutputLanguage: string;
+  quickCtrlEnterTranslateSend: string;
   shortcutPlaceholder: string;
   quickOutputSyncedHint: string;
   modeOutput: string;
@@ -95,6 +96,7 @@ const EN_COPY: SettingsCopy = {
   quickTranslateShortcut: "Quick Translate Shortcut",
   quickInputLanguage: "Quick Input Language",
   quickOutputLanguage: "Quick Output Language",
+  quickCtrlEnterTranslateSend: "Ctrl+Enter: translate then send",
   shortcutPlaceholder: "Focus then press keys",
   quickOutputSyncedHint: "(independent from popover output)",
   modeOutput: "Output",
@@ -150,6 +152,7 @@ const VI_COPY: SettingsCopy = {
   quickTranslateShortcut: "Phím tắt dịch nhanh",
   quickInputLanguage: "Ngôn ngữ vào nhanh",
   quickOutputLanguage: "Ngôn ngữ ra nhanh",
+  quickCtrlEnterTranslateSend: "Ctrl+Enter: dịch rồi gửi",
   shortcutPlaceholder: "Focus rồi bấm phím",
   quickOutputSyncedHint: "(độc lập với output popover)",
   modeOutput: "Theo đầu ra",
