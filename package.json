@@ -1,6 +1,6 @@
 {
   "name": "dictover-desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "packageManager": "pnpm@10.25.0",
   "type": "module",
@@ -8,6 +8,8 @@
     "dev:desktop:win": "powershell -ExecutionPolicy Bypass -File scripts/dev.ps1",
     "build:installer:win": "powershell -ExecutionPolicy Bypass -File scripts/build-installer.ps1",
     "build:installer:win:full": "powershell -ExecutionPolicy Bypass -File scripts/build-installer.ps1 -Full",
+    "release:auto:win": "powershell -ExecutionPolicy Bypass -File scripts/release-auto.ps1",
+    "release:auto:win:dry": "powershell -ExecutionPolicy Bypass -File scripts/release-auto.ps1 -DryRun -SkipBuildInstaller",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",

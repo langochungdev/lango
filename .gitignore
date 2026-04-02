@@ -9,3 +9,4 @@ src-tauri/binaries/
 *.tsbuildinfo
 .env
 sidecar/build/
+results/*.exe

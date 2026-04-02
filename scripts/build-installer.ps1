@@ -141,12 +141,26 @@ $ReqPath = Join-Path $RootDir "sidecar/requirements.txt"
 $ReqStampPath = Join-Path $CacheDir "sidecar-requirements.sha256"
 $SidecarSourceStampPath = Join-Path $CacheDir "sidecar-source.sha256"
 $SidecarExe = Join-Path $RootDir "src-tauri/binaries/dictover-sidecar.exe"
+$InstallerOutputDir = Join-Path $RootDir "results"
+$TauriConfigPath = Join-Path $RootDir "src-tauri/tauri.conf.json"
 $OcrFontName = "NotoSansCJK-Regular.ttc"
 $BundledOcrFontPath = Join-Path $RootDir "src-tauri/binaries/$OcrFontName"
 $DefaultOcrFontSourcePath = Join-Path $RootDir "sidecar/fonts/$OcrFontName"
 $TauriIconIcoPath = Join-Path $RootDir "src-tauri/icons/icon.ico"
 $TauriIconIcnsPath = Join-Path $RootDir "src-tauri/icons/icon.icns"
 $TauriIconPngPath = Join-Path $RootDir "src-tauri/icons/icon.png"
+
+if (-not (Test-Path $TauriConfigPath)) {
+  throw "Khong tim thay tauri config: $TauriConfigPath"
+}
+
+$TauriConfig = Get-Content -Path $TauriConfigPath -Raw | ConvertFrom-Json
+$AppVersion = $TauriConfig.version
+if (-not $AppVersion) {
+  throw "Khong doc duoc version tu $TauriConfigPath"
+}
+
+$CanonicalInstallerName = "DictOver-$AppVersion.exe"
 
 Run-Step "Validate Tauri bundle icons" {
   $missing = @()
@@ -251,12 +265,60 @@ Run-Step "Build sidecar executable (if sidecar source changed)" {
   }
 }
 
+Run-Step "Clean previous installer executables" {
+  New-Item -ItemType Directory -Path $InstallerOutputDir -Force | Out-Null
+
+  $oldResultInstallers = Get-ChildItem -Path $InstallerOutputDir -File -Filter "*.exe" -ErrorAction SilentlyContinue
+  if ($oldResultInstallers) {
+    $removed = 0
+    $skipped = 0
+    foreach ($oldInstaller in $oldResultInstallers) {
+      try {
+        Remove-Item -Path $oldInstaller.FullName -Force -ErrorAction Stop
+        $removed += 1
+      } catch {
+        $skipped += 1
+        Write-Host "  Skip locked installer: $($oldInstaller.FullName)"
+      }
+    }
+    Write-Host "  Removed $removed old installer(s) from $InstallerOutputDir"
+    if ($skipped -gt 0) {
+      Write-Host "  Skipped $skipped locked installer(s) in $InstallerOutputDir"
+    }
+  } else {
+    Write-Host "  No old installers found in $InstallerOutputDir"
+  }
+
+  $bundleRoot = Resolve-NsisBundleDir
+  if (Test-Path $bundleRoot) {
+    $oldBundleInstallers = Get-ChildItem -Path $bundleRoot -Recurse -File | Where-Object { $_.Extension -ieq ".exe" }
+    if ($oldBundleInstallers) {
+      $removedBundle = 0
+      foreach ($oldBundleInstaller in $oldBundleInstallers) {
+        try {
+          Remove-Item -Path $oldBundleInstaller.FullName -Force -ErrorAction Stop
+          $removedBundle += 1
+        } catch {
+          Write-Host "  Skip locked bundle exe: $($oldBundleInstaller.FullName)"
+        }
+      }
+      Write-Host "  Removed $removedBundle stale bundle exe(s) from $bundleRoot"
+    }
+  }
+}
+
 Run-Step "Build Windows installer (NSIS .exe only)" {
   if ($PackageManager -eq "pnpm") {
     pnpm run tauri build -- --target $TargetTriple --bundles nsis
+    if ($LASTEXITCODE -ne 0) {
+      throw "Tauri NSIS build failed with exit code $LASTEXITCODE"
+    }
   }
   else {
     npm run tauri build -- --target $TargetTriple --bundles nsis
+    if ($LASTEXITCODE -ne 0) {
+      throw "Tauri NSIS build failed with exit code $LASTEXITCODE"
+    }
   }
 }
 
@@ -271,11 +333,22 @@ Run-Step "Collect installer artifacts" {
     throw "Khong tim thay file installer .exe trong $bundleRoot"
   }
 
-  Write-Host ""
-  Write-Host "Installer build thanh cong. File tao ra:"
-  $installers | Sort-Object FullName | ForEach-Object {
-    Write-Host " - $($_.FullName)"
+  $installer = $installers | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+  $canonicalBundlePath = Join-Path $bundleRoot $CanonicalInstallerName
+
+  if ($installer.FullName -ne $canonicalBundlePath) {
+    if (Test-Path $canonicalBundlePath) {
+      Remove-Item -Path $canonicalBundlePath -Force -ErrorAction SilentlyContinue
+    }
+    Move-Item -Path $installer.FullName -Destination $canonicalBundlePath -Force
   }
+
+  $destination = Join-Path $InstallerOutputDir $CanonicalInstallerName
+  Copy-Item -Path $canonicalBundlePath -Destination $destination -Force
+
+  Write-Host ""
+  Write-Host "Installer build thanh cong. File tao ra trong results:"
+  Write-Host " - $destination"
 }
 
 $TotalTimer.Stop()
