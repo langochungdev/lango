@@ -19,15 +19,21 @@ const SIDECAR_BINARY_NAME: &str = "dictover-sidecar";
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 pub fn apply_default_sidecar_endpoints() {
-    let base = format!("http://{SIDECAR_HOST}:{SIDECAR_PORT}");
+    let host = std::env::var("SIDECAR_HOST").unwrap_or_else(|_| SIDECAR_HOST.to_owned());
+    let port = std::env::var("SIDECAR_PORT").unwrap_or_else(|_| SIDECAR_PORT.to_owned());
+    let base = format!("http://{host}:{port}");
     set_if_missing("SIDECAR_URL", &format!("{base}/translate"));
     set_if_missing("SIDECAR_LOOKUP_URL", &format!("{base}/lookup"));
     set_if_missing("SIDECAR_IMAGES_URL", &format!("{base}/images"));
     set_if_missing("SIDECAR_OCR_URL", &format!("{base}/ocr"));
+    set_if_missing("SIDECAR_OCR_OVERLAY_URL", &format!("{base}/ocr-overlay"));
 }
 
 pub fn start_release_sidecar(app: &AppHandle) -> Result<Option<Child>, Error> {
     apply_default_sidecar_endpoints();
+
+    let host = std::env::var("SIDECAR_HOST").unwrap_or_else(|_| SIDECAR_HOST.to_owned());
+    let port = std::env::var("SIDECAR_PORT").unwrap_or_else(|_| SIDECAR_PORT.to_owned());
 
     if cfg!(debug_assertions) {
         return Ok(None);
@@ -50,12 +56,19 @@ pub fn start_release_sidecar(app: &AppHandle) -> Result<Option<Child>, Error> {
 
     let mut command = Command::new(&sidecar_path);
     command
-        .env("SIDECAR_HOST", SIDECAR_HOST)
-        .env("SIDECAR_PORT", SIDECAR_PORT)
+        .env("SIDECAR_HOST", &host)
+        .env("SIDECAR_PORT", &port)
         .arg("--host")
-        .arg(SIDECAR_HOST)
+        .arg(&host)
         .arg("--port")
-        .arg(SIDECAR_PORT);
+        .arg(&port);
+
+    let bundled_font_path = resource_dir
+        .join("binaries")
+        .join("NotoSansCJK-Regular.ttc");
+    if bundled_font_path.exists() {
+        command.env("DICTOVER_OCR_FONT", bundled_font_path);
+    }
 
     #[cfg(target_os = "windows")]
     command.creation_flags(CREATE_NO_WINDOW);

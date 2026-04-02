@@ -8,8 +8,14 @@ export type PopoverState =
   | "loading"
   | "lookup"
   | "translate"
+  | "ocrImage"
   | "error";
-export type PopoverTrigger = "auto" | "shortcut" | "ocr";
+export type PopoverTrigger = "auto" | "shortcut" | "ocr" | "ocr-image-overlay";
+
+export interface OcrImageOverlayData {
+  imageBase64: string;
+  text: string;
+}
 
 export interface PopoverData {
   selectedText: string;
@@ -18,6 +24,7 @@ export interface PopoverData {
   lookupDisplayDefinition: string | null;
   dictionary: DictionaryResult | null;
   translation: TranslateResult | null;
+  ocrImageOverlay: OcrImageOverlayData | null;
 }
 
 const EMPTY_DATA: PopoverData = {
@@ -27,11 +34,14 @@ const EMPTY_DATA: PopoverData = {
   lookupDisplayDefinition: null,
   dictionary: null,
   translation: null,
+  ocrImageOverlay: null,
 };
 
 function normalizeSingleLineText(input: string): string {
   return input.replace(/\s+/g, " ").trim();
 }
+
+const SENTENCE_PUNCTUATION_PATTERN = /[.!?;:。,、！？；：]/u;
 
 function getFirstDefinition(dictionary: DictionaryResult): string {
   for (const meaning of dictionary.meanings) {
@@ -66,8 +76,58 @@ function countWords(input: string): number {
   return words.length;
 }
 
+function countNonWhitespaceChars(input: string): number {
+  return Array.from(input).reduce((count, char) => {
+    if (char.trim()) {
+      return count + 1;
+    }
+    return count;
+  }, 0);
+}
+
+function isCjkChar(char: string): boolean {
+  const codePoint = char.codePointAt(0);
+  if (typeof codePoint !== "number") {
+    return false;
+  }
+
+  return (
+    (codePoint >= 0x3400 && codePoint <= 0x4dbf) ||
+    (codePoint >= 0x4e00 && codePoint <= 0x9fff) ||
+    (codePoint >= 0xf900 && codePoint <= 0xfaff) ||
+    (codePoint >= 0x3040 && codePoint <= 0x30ff) ||
+    (codePoint >= 0x31f0 && codePoint <= 0x31ff) ||
+    (codePoint >= 0xac00 && codePoint <= 0xd7af)
+  );
+}
+
+function shouldTranslateText(input: string): boolean {
+  const normalized = input.trim();
+  if (!normalized) {
+    return false;
+  }
+
+  if (countWords(normalized) > 1) {
+    return true;
+  }
+
+  const charCount = countNonWhitespaceChars(normalized);
+  if (charCount >= 24) {
+    return true;
+  }
+
+  const cjkCount = Array.from(normalized).filter((char) =>
+    isCjkChar(char),
+  ).length;
+  if (cjkCount >= 6) {
+    return true;
+  }
+
+  return SENTENCE_PUNCTUATION_PATTERN.test(normalized) && charCount >= 8;
+}
+
 export function getActionType(input: string): "lookup" | "translate" {
-  return countWords(input) === 1 ? "lookup" : "translate";
+  return shouldTranslateText(input) ? "translate" : "lookup";
 }
 
 export function usePopover(settings: AppSettings) {
@@ -105,6 +165,7 @@ export function usePopover(settings: AppSettings) {
         lookupDisplayDefinition: null,
         dictionary: null,
         translation: null,
+        ocrImageOverlay: null,
       };
 
       const shouldDiscardResult = () =>
@@ -252,11 +313,40 @@ export function usePopover(settings: AppSettings) {
     [close, settings],
   );
 
+  const openOcrImageOverlay = useCallback(
+    (imageBase64: string, text: string) => {
+      const imagePayload = imageBase64.trim();
+      if (!imagePayload) {
+        close();
+        return;
+      }
+
+      activeRequestIdRef.current += 1;
+      const selectedText = text.replace(/\s+/g, " ").trim();
+      setError(null);
+      setData({
+        selectedText,
+        trigger: "ocr-image-overlay",
+        lookupDisplayWord: null,
+        lookupDisplayDefinition: null,
+        dictionary: null,
+        translation: null,
+        ocrImageOverlay: {
+          imageBase64: imagePayload,
+          text: selectedText,
+        },
+      });
+      setState("ocrImage");
+    },
+    [close],
+  );
+
   return {
     state,
     data,
     error,
     close,
     openFromSelection,
+    openOcrImageOverlay,
   };
 }

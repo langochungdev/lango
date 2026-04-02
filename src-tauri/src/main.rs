@@ -91,7 +91,9 @@ fn main() {
             bridge::show_settings_window,
             bridge::hide_settings_window,
             bridge::show_debug_window,
+            bridge::open_external_url,
             bridge::copy_text_to_clipboard,
+            bridge::copy_image_to_clipboard,
             bridge::resize_popover
         ])
         .build(tauri::generate_context!())

@@ -3,9 +3,48 @@ $ErrorActionPreference = "Stop"
 $RootDir = Resolve-Path (Join-Path $PSScriptRoot "..")
 $PythonBin = if ($env:PYTHON_BIN) { $env:PYTHON_BIN } else { "python" }
 $SidecarPort = if ($env:SIDECAR_PORT) { $env:SIDECAR_PORT } else { "49152" }
+$PackageManager = if ($env:DICTOVER_PACKAGE_MANAGER) {
+  $env:DICTOVER_PACKAGE_MANAGER
+} elseif (Get-Command pnpm -ErrorAction SilentlyContinue) {
+  "pnpm"
+} else {
+  "npm"
+}
+$OcrFontName = "NotoSansCJK-Regular.ttc"
+$BundledOcrFontPath = Join-Path $RootDir "src-tauri/binaries/$OcrFontName"
 
 $sidecarProc = $null
 $sidecarStartedByScript = $false
+
+function Ensure-OcrFontResource {
+  if (Test-Path $BundledOcrFontPath) {
+    return
+  }
+
+  New-Item -ItemType Directory -Path (Split-Path $BundledOcrFontPath -Parent) -Force | Out-Null
+
+  $candidates = @()
+  if ($env:DICTOVER_OCR_FONT_SOURCE) {
+    $candidates += $env:DICTOVER_OCR_FONT_SOURCE
+  }
+  $candidates += (Join-Path $RootDir "sidecar/fonts/$OcrFontName")
+  $candidates += "C:\Windows\Fonts\NotoSansCJK-Regular.ttc"
+  $candidates += "C:\Windows\Fonts\arial.ttf"
+
+  $source = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+  if (-not $source) {
+    throw @"
+Khong tim thay file font OCR bat buoc cho Tauri resource: $OcrFontName
+
+Hay dat font tai sidecar/fonts/$OcrFontName
+hoac set bien moi truong DICTOVER_OCR_FONT_SOURCE tro den file font truoc khi chay:
+npm run dev:desktop:win
+"@
+  }
+
+  Copy-Item -Path $source -Destination $BundledOcrFontPath -Force
+  Write-Host "  OCR font resource ready: $BundledOcrFontPath"
+}
 
 function Test-PortInUse {
   param([int]$Port)
@@ -163,15 +202,28 @@ try {
     $sidecarStartedByScript = $true
   }
 
-  Write-Host "[2/3] Install frontend deps"
+  Write-Host "[2/4] Install frontend deps"
   Set-Location $RootDir
-  npm install
+  if ($PackageManager -eq "pnpm") {
+    pnpm install
+  }
+  else {
+    npm install
+  }
 
-  Write-Host "[3/3] Start Tauri dev"
+  Write-Host "[3/4] Ensure OCR font resource"
+  Ensure-OcrFontResource
+
+  Write-Host "[4/4] Start Tauri dev"
   $env:SIDECAR_PORT = "$effectiveSidecarPort"
   $env:DICTOVER_ENABLE_DEBUG_TRACE = "1"
   $env:VITE_DEBUG_TRACE = "1"
-  npm run tauri dev
+  if ($PackageManager -eq "pnpm") {
+    pnpm run tauri dev
+  }
+  else {
+    npm run tauri dev
+  }
 }
 finally {
   if ($sidecarStartedByScript -and $null -ne $sidecarProc -and -not $sidecarProc.HasExited) {

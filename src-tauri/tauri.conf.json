@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "identifier": "com.dictover.desktop",
   "build": {
-    "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build",
+    "beforeDevCommand": "pnpm run dev",
+    "beforeBuildCommand": "pnpm run build",
     "devUrl": "http://localhost:5173",
     "frontendDist": "../dist"
   },
@@ -15,11 +15,11 @@
         "label": "main",
         "title": "DictOver Settings",
         "width": 920,
-        "height": 640,
+        "height": 510,
         "resizable": false,
         "decorations": false,
         "skipTaskbar": true,
-        "transparent": true,
+        "transparent": false,
         "center": true,
         "visibleOnAllWorkspaces": false
       },
@@ -93,7 +93,8 @@
       "icons/icon.png"
     ],
     "resources": [
-      "binaries/dictover-sidecar.exe"
+      "binaries/dictover-sidecar.exe",
+      "binaries/NotoSansCJK-Regular.ttc"
     ],
     "windows": {
       "webviewInstallMode": {

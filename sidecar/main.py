@@ -8,11 +8,11 @@ import uvicorn
 
 try:
     from .image import search_images
-    from .ocr import run_ocr
+    from .ocr import run_ocr, run_ocr_overlay
     from .translation import lookup_dictionary, translate
 except ImportError:
     from image import search_images
-    from ocr import run_ocr
+    from ocr import run_ocr, run_ocr_overlay
     from translation import lookup_dictionary, translate
 
 
@@ -130,6 +130,14 @@ async def image_search_endpoint(req: ImageSearchRequest) -> dict:
 async def ocr_endpoint(req: OcrRequest) -> dict[str, str]:
     try:
         return {"text": run_ocr(req.image_base64, req.source, req.target)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/ocr-overlay")
+async def ocr_overlay_endpoint(req: OcrRequest) -> dict[str, str]:
+    try:
+        return run_ocr_overlay(req.image_base64, req.source, req.target)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

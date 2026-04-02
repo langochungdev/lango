@@ -64,7 +64,7 @@ fn sanitize_shortcut(raw: &str, fallback: &str, allow_modifier_only: bool) -> St
     parts.join("+")
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
     pub enable_lookup: bool,
@@ -86,6 +86,7 @@ pub struct AppConfig {
     pub hotkey_translate_shortcut: String,
     pub enable_hotkey_translate: bool,
     pub hotkey_translate_ctrl_enter_send: bool,
+    pub ocr_paragraph_display_mode: String,
 }
 
 impl Default for AppConfig {
@@ -96,7 +97,7 @@ impl Default for AppConfig {
             enable_audio: true,
             enable_ocr: true,
             auto_play_audio_mode: "off".to_owned(),
-            popover_trigger_mode: "auto".to_owned(),
+            popover_trigger_mode: "shortcut".to_owned(),
             popover_shortcut: "Ctrl+Shift+D".to_owned(),
             ocr_hotkey: "Alt+A".to_owned(),
             source_language: "en".to_owned(),
@@ -110,6 +111,7 @@ impl Default for AppConfig {
             hotkey_translate_shortcut: "Shift".to_owned(),
             enable_hotkey_translate: true,
             hotkey_translate_ctrl_enter_send: false,
+            ocr_paragraph_display_mode: "popover".to_owned(),
         }
     }
 }
@@ -118,34 +120,58 @@ impl AppConfig {
     pub fn sanitize(self) -> Self {
         let mut next = self;
         next.max_definitions = next.max_definitions.clamp(1, 10);
-        if next.auto_play_audio_mode.is_empty() {
+        if !matches!(next.auto_play_audio_mode.as_str(), "off" | "word" | "all") {
             next.auto_play_audio_mode = "off".to_owned();
         }
-        if next.popover_trigger_mode != "shortcut" {
-            next.popover_trigger_mode = "auto".to_owned();
+        if !matches!(next.popover_trigger_mode.as_str(), "auto" | "shortcut") {
+            next.popover_trigger_mode = "shortcut".to_owned();
         }
         next.popover_shortcut = sanitize_shortcut(&next.popover_shortcut, "Ctrl+Shift+D", false);
         next.ocr_hotkey = sanitize_shortcut(&next.ocr_hotkey, "Alt+A", false);
-        if next.source_language.is_empty() {
+        if !matches!(
+            next.source_language.as_str(),
+            "auto" | "vi" | "en" | "zh-CN" | "ja" | "ko" | "ru" | "de" | "fr" | "fi"
+        ) {
             next.source_language = "en".to_owned();
         }
-        if next.target_language.is_empty() {
+        if !matches!(
+            next.target_language.as_str(),
+            "vi" | "en" | "zh-CN" | "ja" | "ko" | "ru" | "de" | "fr" | "fi"
+        ) {
             next.target_language = "vi".to_owned();
         }
-        if next.quick_translate_source_language.is_empty() {
+        if !matches!(
+            next.quick_translate_source_language.as_str(),
+            "auto" | "vi" | "en" | "zh-CN" | "ja" | "ko" | "ru" | "de" | "fr" | "fi"
+        ) {
             next.quick_translate_source_language = "auto".to_owned();
         }
-        if next.quick_translate_target_language.is_empty() {
+        if !matches!(
+            next.quick_translate_target_language.as_str(),
+            "vi" | "en" | "zh-CN" | "ja" | "ko" | "ru" | "de" | "fr" | "fi"
+        ) {
             next.quick_translate_target_language = "en".to_owned();
         }
-        if next.popover_open_panel_mode.is_empty() {
+        if !matches!(
+            next.popover_open_panel_mode.as_str(),
+            "none" | "details" | "images"
+        ) {
             next.popover_open_panel_mode = "none".to_owned();
         }
-        if next.popover_definition_language_mode.is_empty() {
+        if !matches!(
+            next.popover_definition_language_mode.as_str(),
+            "output" | "input" | "english"
+        ) {
             next.popover_definition_language_mode = "output".to_owned();
         }
         next.hotkey_translate_shortcut =
             sanitize_shortcut(&next.hotkey_translate_shortcut, "Shift", true);
+        if !matches!(
+            next.ocr_paragraph_display_mode.as_str(),
+            "image" | "popover"
+        ) {
+            next.ocr_paragraph_display_mode = "popover".to_owned();
+        }
         next
     }
 }
@@ -174,7 +200,11 @@ pub fn load_config_from_disk(app: &AppHandle) -> AppConfig {
     let Ok(parsed) = serde_json::from_str::<AppConfig>(&content) else {
         return AppConfig::default();
     };
-    parsed.sanitize()
+    let clean = parsed.clone().sanitize();
+    if clean != parsed {
+        let _ = save_config_to_disk(app, &clean);
+    }
+    clean
 }
 
 pub fn save_config_to_disk(app: &AppHandle, config: &AppConfig) -> Result<(), String> {

@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { emit, listen } from '@tauri-apps/api/event'
+import { LogicalSize } from '@tauri-apps/api/dpi'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Popover } from '@/components/Popover/Popover'
 import { DebugLogWindow } from '@/components/DebugLog/DebugLogWindow'
 import { OcrOverlayWindow } from '@/components/OcrOverlay/OcrOverlayWindow'
 import { SettingsPanel } from '@/components/Settings/SettingsPanel'
 import { getSettingsCopy } from '@/constants/settingsI18n'
-import { usePopover, type PopoverState } from '@/hooks/usePopover'
+import { usePopover, type PopoverState, type PopoverTrigger } from '@/hooks/usePopover'
 import { loadSettings, saveSettings } from '@/services/config'
 import {
   appendDebugLog,
@@ -23,7 +24,7 @@ import { DEFAULT_SETTINGS, sanitizeSettings, type AppSettings } from '@/types/se
 interface SelectionEventPayload {
   event_id?: number
   text: string
-  trigger: 'auto' | 'shortcut' | 'ocr'
+  trigger: 'auto' | 'shortcut' | 'ocr' | 'ocr-image-overlay'
   anchor?: SelectionAnchor | null
 }
 
@@ -163,7 +164,10 @@ function SettingsWindow() {
   const [loadingSettings, setLoadingSettings] = useState(true)
   const settingsRef = useRef<AppSettings>(DEFAULT_SETTINGS)
   const saveSequenceRef = useRef(0)
+  const shellRef = useRef<HTMLElement | null>(null)
+  const lastSyncedWindowHeightRef = useRef(0)
   const copy = getSettingsCopy(settings.target_language)
+  const hasTauriBridge = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
   useEffect(() => {
     settingsRef.current = settings
@@ -239,38 +243,110 @@ function SettingsWindow() {
   }, [])
 
   useEffect(() => {
-    const hasTauriBridge = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
-    
     const onKeydown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         void invoke('hide_settings_window').catch(() => undefined)
       }
     }
-    
-    const onWindowBlur = () => {
-      void invoke('hide_settings_window').catch(() => undefined)
-    }
-
-    let cleanupTauriFocus: (() => void) | null = null
-    if (hasTauriBridge) {
-      void getCurrentWindow().onFocusChanged(({ payload: focused }) => {
-        if (!focused) {
-          void invoke('hide_settings_window').catch(() => undefined)
-        }
-      }).then((unlisten) => {
-        cleanupTauriFocus = unlisten
-      }).catch(() => undefined)
-    }
 
     window.addEventListener('keydown', onKeydown)
-    window.addEventListener('blur', onWindowBlur)
     
     return () => {
       window.removeEventListener('keydown', onKeydown)
-      window.removeEventListener('blur', onWindowBlur)
-      cleanupTauriFocus?.()
     }
   }, [])
+
+  const syncSettingsWindowSize = useCallback(async () => {
+    if (!hasTauriBridge || !shellRef.current) {
+      return
+    }
+
+    const shell = shellRef.current
+    const visibleHeight = Math.ceil(shell.getBoundingClientRect().height)
+    const contentHeight = Math.ceil(shell.scrollHeight)
+    const nextHeight = Math.max(180, Math.max(visibleHeight, contentHeight) + 12)
+    if (Math.abs(nextHeight - lastSyncedWindowHeightRef.current) <= 1) {
+      return
+    }
+
+    try {
+      const currentWindow = getCurrentWindow()
+      const innerSize = await currentWindow.innerSize()
+      const scaleFactor = await currentWindow.scaleFactor()
+      const logicalWidth = Math.max(720, Math.round(innerSize.width / scaleFactor))
+      await currentWindow.setSize(new LogicalSize(logicalWidth, nextHeight))
+      lastSyncedWindowHeightRef.current = nextHeight
+    } catch {
+      return
+    }
+  }, [hasTauriBridge])
+
+  useEffect(() => {
+    if (loadingSettings || !hasTauriBridge) {
+      return
+    }
+
+    let rafId = 0
+    let focusSyncTimerId = 0
+    let focusSyncTimerIdLate = 0
+    let cleanupFocusChanged: (() => void) | null = null
+    const scheduleSync = () => {
+      if (rafId) {
+        window.cancelAnimationFrame(rafId)
+      }
+      rafId = window.requestAnimationFrame(() => {
+        void syncSettingsWindowSize()
+      })
+    }
+
+    const observer = new ResizeObserver(() => {
+      scheduleSync()
+    })
+
+    if (shellRef.current) {
+      observer.observe(shellRef.current)
+    }
+
+    void (async () => {
+      try {
+        const unlisten = await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+          if (!focused) {
+            return
+          }
+          scheduleSync()
+          if (focusSyncTimerId) {
+            window.clearTimeout(focusSyncTimerId)
+          }
+          if (focusSyncTimerIdLate) {
+            window.clearTimeout(focusSyncTimerIdLate)
+          }
+          focusSyncTimerId = window.setTimeout(scheduleSync, 80)
+          focusSyncTimerIdLate = window.setTimeout(scheduleSync, 220)
+        })
+        cleanupFocusChanged = unlisten
+      } catch {
+        cleanupFocusChanged = null
+      }
+    })()
+
+    scheduleSync()
+    window.addEventListener('resize', scheduleSync)
+
+    return () => {
+      if (rafId) {
+        window.cancelAnimationFrame(rafId)
+      }
+      if (focusSyncTimerId) {
+        window.clearTimeout(focusSyncTimerId)
+      }
+      if (focusSyncTimerIdLate) {
+        window.clearTimeout(focusSyncTimerIdLate)
+      }
+      cleanupFocusChanged?.()
+      observer.disconnect()
+      window.removeEventListener('resize', scheduleSync)
+    }
+  }, [hasTauriBridge, loadingSettings, syncSettingsWindowSize])
 
   const handleSettingsChange = useCallback((next: AppSettings) => {
     const previous = settingsRef.current
@@ -333,8 +409,12 @@ function SettingsWindow() {
     return copy.saveFailed
   }, [copy, status])
 
+  if (loadingSettings) {
+    return null
+  }
+
   return (
-    <main className={`apl-settings-shell ${status === 'saving' ? 'is-saving' : ''}`}>
+    <main ref={shellRef} className={`apl-settings-shell ${status === 'saving' ? 'is-saving' : ''}`}>
       <div className="apl-settings-toolbar-clean">
         <div className="apl-settings-status-bar apl-settings-status-bar--compact" aria-live="polite">
           <span className={`apl-settings-status-dot ${status === 'ready' || status === 'autoSaved' ? 'is-active' : ''}`} />
@@ -344,14 +424,6 @@ function SettingsWindow() {
           {copy.resetDefaults}
         </button>
       </div>
-
-      {loadingSettings && (
-        <section className="apl-settings-boot" role="status" aria-live="polite">
-          <div className="apl-settings-boot-card" />
-          <div className="apl-settings-boot-card" />
-          <div className="apl-settings-boot-card" />
-        </section>
-      )}
 
       <SettingsPanel
         open
@@ -370,13 +442,19 @@ function PopoverWindow() {
   const lastLoggedStateRef = useRef<string>('idle')
   const lastSelectionEventRef = useRef<{ key: string; at: number; eventId: number | null }>({ key: '', at: 0, eventId: null })
   const lastHotkeyEventRef = useRef({ copyAt: 0, clearAt: 0 })
+  const activeTriggerRef = useRef<PopoverTrigger>('auto')
+  const lastOcrOpenAtRef = useRef(0)
   const { state, data, error, close, openFromSelection } = usePopover(settings)
   const hasTauriBridge = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
   useEffect(() => {
     stateRef.current = state
     anchorRef.current = selectionAnchor
-  }, [selectionAnchor, state])
+    activeTriggerRef.current = data.trigger
+    if (state !== 'idle' && data.trigger === 'ocr') {
+      lastOcrOpenAtRef.current = Date.now()
+    }
+  }, [data.trigger, selectionAnchor, state])
 
   const exportTraceLogs = useCallback((source: 'local-f8' | 'global-f8') => {
     const now = Date.now()
@@ -445,13 +523,24 @@ function PopoverWindow() {
       eventId: incomingEventId,
     }
     setSelectionAnchor(anchor)
+
+    if (payload.trigger === 'ocr-image-overlay') {
+      close()
+      appendDebugLog(
+        'popover',
+        'OCR image overlay selection anchor ready',
+        `${source} | ${anchorSummary(anchor)}`,
+      )
+      return
+    }
+
     appendDebugLog(
       'popover',
       source === 'pending' ? 'Consume pending selection' : 'Selection changed',
       `${payload.trigger} | "${shortText(text)}" | ${anchorSummary(anchor)}`,
     )
     await openFromSelection(text, payload.trigger)
-  }, [openFromSelection])
+  }, [close, openFromSelection])
 
   const consumePendingSelection = useCallback(async () => {
     try {
@@ -508,13 +597,36 @@ function PopoverWindow() {
     }
   }, [])
 
+  const shouldIgnoreTransientOcrClose = useCallback((reason?: string) => {
+    if (!reason || activeTriggerRef.current !== 'ocr') {
+      return false
+    }
+
+    const age = Date.now() - lastOcrOpenAtRef.current
+    if (age > 1400) {
+      return false
+    }
+
+    return reason === 'window-blur'
+      || reason === 'tauri-window-blur'
+      || reason === 'window-focused-false'
+      || reason === 'windows-desktop-switch-fg'
+      || reason === 'desktop-switch-hidden'
+      || reason === 'desktop-switch-pagehide'
+  }, [])
+
   const closePopover = useCallback((reason?: string) => {
+    if (shouldIgnoreTransientOcrClose(reason)) {
+      appendDebugLog('popover', 'Skip transient close', reason ?? 'unknown-reason')
+      return
+    }
+
     close()
     if (reason) {
       appendDebugLog('popover', 'Close popover', reason)
     }
     void invoke('hide_popover')
-  }, [close])
+  }, [close, shouldIgnoreTransientOcrClose])
 
   useEffect(() => {
     let cleanupSelection: (() => void) | null = null
@@ -575,6 +687,15 @@ function PopoverWindow() {
         'popover',
         'Translate success',
         `"${shortText(data.selectedText)}" | ${data.translation.mode} | ${data.translation.engine}`
+      )
+      return
+    }
+
+    if (state === 'ocrImage' && data.ocrImageOverlay) {
+      appendDebugLog(
+        'popover',
+        'OCR image overlay shown',
+        `textLen=${data.ocrImageOverlay.text.length} | imageBytes=${data.ocrImageOverlay.imageBase64.length}`,
       )
       return
     }
@@ -773,6 +894,7 @@ function PopoverWindow() {
         lookupDisplayDefinition={data.lookupDisplayDefinition}
         dictionary={data.dictionary}
         translation={data.translation}
+        ocrImageOverlay={data.ocrImageOverlay}
         error={error}
         panelMode={settings.popover_open_panel_mode}
         enableAudio={settings.enable_audio}

@@ -56,6 +56,7 @@ static PENDING_SELECTION_EVENT: OnceLock<Mutex<Option<SelectionEvent>>> = OnceLo
 static MODIFIER_HOTKEY_STATE: OnceLock<Mutex<ModifierHotkeyState>> = OnceLock::new();
 static MOUSE_SELECTION_STATE: OnceLock<Mutex<MouseSelectionState>> = OnceLock::new();
 static NAVIGATION_HOTKEY_STATE: OnceLock<Mutex<NavigationHotkeyState>> = OnceLock::new();
+static OCR_POPOVER_OPENED_AT: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
 static CTRL_ENTER_INTERCEPT_ACTIVE: AtomicBool = AtomicBool::new(false);
 static SELECTION_EVENT_SEQ: OnceLock<AtomicU64> = OnceLock::new();
 #[cfg(target_os = "windows")]
@@ -74,6 +75,7 @@ const POPOVER_BASE_HEIGHT: f64 = 72.0;
 const CURSOR_GAP: i32 = 10;
 const CURSOR_ABOVE_EXTRA_GAP_MAX: i32 = 6;
 const CURSOR_ABOVE_NEAR_BOTTOM_RATIO: f32 = 0.22;
+const OCR_TRANSIENT_CLOSE_GUARD_MS: u64 = 1400;
 
 fn emit_hotkey_trace(app: &AppHandle, stage: &str, shortcut: &str, detail: String) {
     if !debug_trace::enabled() {
@@ -138,6 +140,10 @@ fn navigation_hotkey_state() -> &'static Mutex<NavigationHotkeyState> {
             shift_pressed: false,
         })
     })
+}
+
+fn ocr_popover_opened_at() -> &'static Mutex<Option<Instant>> {
+    OCR_POPOVER_OPENED_AT.get_or_init(|| Mutex::new(None))
 }
 
 fn next_selection_event_id() -> u64 {
@@ -819,6 +825,14 @@ pub fn show_popover_window(
     trigger: String,
     cursor: Option<(i32, i32)>,
 ) -> Result<(), String> {
+    if let Ok(mut guard) = ocr_popover_opened_at().lock() {
+        if trigger == "ocr" {
+            *guard = Some(Instant::now());
+        } else {
+            *guard = None;
+        }
+    }
+
     let anchor = build_selection_anchor(cursor);
     let event_id = next_selection_event_id();
 
@@ -1189,6 +1203,27 @@ pub fn hide_popover_window(app: &AppHandle) -> Result<(), String> {
 }
 
 fn force_close_popover(app: &AppHandle, reason: &str) -> Result<(), String> {
+    let is_transient_reason =
+        reason == "window-focused-false" || reason == "windows-desktop-switch-fg";
+    if is_transient_reason {
+        let should_skip = ocr_popover_opened_at()
+            .lock()
+            .ok()
+            .and_then(|guard| *guard)
+            .map(|opened| opened.elapsed() <= Duration::from_millis(OCR_TRANSIENT_CLOSE_GUARD_MS))
+            .unwrap_or(false);
+
+        if should_skip {
+            emit_hotkey_trace(
+                app,
+                "popover-force-close-skip",
+                "popover",
+                format!("reason={reason}"),
+            );
+            return Ok(());
+        }
+    }
+
     let _ = app.emit("force-close-popover", reason.to_owned());
     hide_popover_window(app)
 }

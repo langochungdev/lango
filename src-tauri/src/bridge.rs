@@ -1,5 +1,8 @@
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use reqwest::Client;
+use screenshots::image;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::sync::Mutex;
 use tauri::{
     AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, Position, Size, State,
@@ -92,6 +95,32 @@ pub struct OcrPayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OcrResponse {
     pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OcrOverlayResponse {
+    pub text: String,
+    pub translated_text: String,
+    pub image_base64: String,
+    #[serde(default)]
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct OcrOverlayResultEvent {
+    image_base64: String,
+    text: String,
+    original_text: String,
+    left: i32,
+    top: i32,
+    width: i32,
+    height: i32,
+    source_language: String,
+    target_language: String,
+    original_text_len: usize,
+    translated_text_len: usize,
+    translation_applied: bool,
+    image_overlay_changed: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -187,6 +216,104 @@ async fn run_ocr_via_sidecar(client: &Client, payload: OcrPayload) -> Result<Ocr
         .map_err(|err| format!("sidecar ocr decode failed: {err}"))
 }
 
+async fn run_ocr_overlay_via_sidecar(
+    client: &Client,
+    payload: OcrPayload,
+) -> Result<OcrOverlayResponse, String> {
+    let endpoint = std::env::var("SIDECAR_OCR_OVERLAY_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:49152/ocr-overlay".to_owned());
+    let response = client
+        .post(endpoint)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|err| format!("sidecar ocr overlay request failed: {err}"))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|err| format!("sidecar ocr overlay read failed: {err}"))?;
+
+    if !status.is_success() {
+        let snippet: String = body.chars().take(240).collect();
+        return Err(format!("sidecar ocr overlay http {}: {}", status, snippet));
+    }
+
+    serde_json::from_str::<OcrOverlayResponse>(&body).map_err(|err| {
+        let snippet: String = body.chars().take(240).collect();
+        format!("sidecar ocr overlay decode failed: {err} | body={snippet}")
+    })
+}
+
+fn count_words(input: &str) -> usize {
+    input
+        .split_whitespace()
+        .filter(|part| !part.is_empty())
+        .count()
+}
+
+fn count_non_whitespace_chars(input: &str) -> usize {
+    input.chars().filter(|ch| !ch.is_whitespace()).count()
+}
+
+fn is_cjk_char(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{3400}'..='\u{4DBF}'
+            | '\u{4E00}'..='\u{9FFF}'
+            | '\u{F900}'..='\u{FAFF}'
+            | '\u{3040}'..='\u{30FF}'
+            | '\u{31F0}'..='\u{31FF}'
+            | '\u{AC00}'..='\u{D7AF}'
+    )
+}
+
+fn contains_sentence_punctuation(input: &str) -> bool {
+    input.chars().any(|ch| {
+        matches!(
+            ch,
+            '.' | ',' | '!' | '?' | ';' | ':' | '。' | '，' | '、' | '！' | '？' | '；' | '：'
+        )
+    })
+}
+
+fn should_use_ocr_image_overlay(input: &str) -> bool {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    if count_words(trimmed) > 1 {
+        return true;
+    }
+
+    let char_count = count_non_whitespace_chars(trimmed);
+    if char_count >= 24 {
+        return true;
+    }
+
+    let cjk_char_count = trimmed.chars().filter(|ch| is_cjk_char(*ch)).count();
+    if cjk_char_count >= 6 {
+        return true;
+    }
+
+    contains_sentence_punctuation(trimmed) && char_count >= 8
+}
+
+fn is_supported_source_language(value: &str) -> bool {
+    matches!(
+        value,
+        "auto" | "vi" | "en" | "zh-CN" | "ja" | "ko" | "ru" | "de" | "fr" | "fi"
+    )
+}
+
+fn is_supported_target_language(value: &str) -> bool {
+    matches!(
+        value,
+        "vi" | "en" | "zh-CN" | "ja" | "ko" | "ru" | "de" | "fr" | "fi"
+    )
+}
+
 fn monitor_for_cursor(window: &tauri::WebviewWindow, cursor: (i32, i32)) -> Option<tauri::Monitor> {
     let monitors = window.available_monitors().ok()?;
     let (x, y) = cursor;
@@ -277,6 +404,9 @@ pub fn show_loading_indicator(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn show_ocr_overlay(app: AppHandle) -> Result<(), String> {
+    let _ = selection::hide_popover_window(&app);
+    let _ = app.emit("ocr-overlay-reset", "open");
+
     let overlay = app
         .get_webview_window(OCR_OVERLAY_WINDOW_LABEL)
         .ok_or_else(|| "ocr overlay window not found".to_owned())?;
@@ -314,6 +444,7 @@ pub fn cancel_ocr_overlay(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+#[allow(non_snake_case)]
 pub async fn submit_ocr_selection(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -321,6 +452,10 @@ pub async fn submit_ocr_selection(
     top: i32,
     right: i32,
     bottom: i32,
+    source_language: Option<String>,
+    sourceLanguage: Option<String>,
+    target_language: Option<String>,
+    targetLanguage: Option<String>,
 ) -> Result<(), String> {
     emit_hotkey_trace(
         &app,
@@ -344,9 +479,25 @@ pub async fn submit_ocr_selection(
     let physical_right = overlay_pos.x + (f64::from(right) * scale_factor).round() as i32;
     let physical_bottom = overlay_pos.y + (f64::from(bottom) * scale_factor).round() as i32;
 
-    cancel_ocr_overlay(app.clone())?;
+    let logical_left = left.min(right);
+    let logical_top = top.min(bottom);
+    let logical_width = (right - left).abs();
+    let logical_height = (bottom - top).abs();
 
-    let (ocr_enabled, source_language, target_language) = {
+    let _ = app.emit("ocr-overlay-processing", "processing");
+
+    let requested_source_language = source_language
+        .or(sourceLanguage)
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
+    let requested_target_language = target_language
+        .or(targetLanguage)
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
+    let requested_source_for_log = requested_source_language.clone();
+    let requested_target_for_log = requested_target_language.clone();
+
+    let (ocr_enabled, config_source_language, config_target_language, ocr_paragraph_display_mode) = {
         let guard = state
             .config
             .lock()
@@ -355,7 +506,23 @@ pub async fn submit_ocr_selection(
             guard.enable_ocr,
             guard.source_language.clone(),
             guard.target_language.clone(),
+            guard.ocr_paragraph_display_mode.clone(),
         )
+    };
+    let effective_source_language = requested_source_language
+        .as_deref()
+        .filter(|value| is_supported_source_language(value))
+        .map(str::to_owned)
+        .unwrap_or(config_source_language);
+    let effective_target_language = requested_target_language
+        .as_deref()
+        .filter(|value| is_supported_target_language(value))
+        .map(str::to_owned)
+        .unwrap_or(config_target_language);
+    let ocr_source_language = if effective_source_language == effective_target_language {
+        "auto".to_owned()
+    } else {
+        effective_source_language.clone()
     };
     if !ocr_enabled {
         emit_hotkey_trace(
@@ -366,6 +533,20 @@ pub async fn submit_ocr_selection(
         );
         return Ok(());
     }
+
+    emit_hotkey_trace(
+        &app,
+        "ocr-language-resolved",
+        "overlay",
+        format!(
+            "requestedSource={} requestedTarget={} effectiveSource={} effectiveTarget={} ocrSource={}",
+            requested_source_for_log.as_deref().unwrap_or("<none>"),
+            requested_target_for_log.as_deref().unwrap_or("<none>"),
+            effective_source_language,
+            effective_target_language,
+            ocr_source_language
+        ),
+    );
 
     let Some(region) =
         ocr::normalize_region(physical_left, physical_top, physical_right, physical_bottom)
@@ -401,11 +582,13 @@ pub async fn submit_ocr_selection(
             Ok(Ok(value)) => value,
             Ok(Err(err)) => {
                 emit_hotkey_trace(&app, "ocr-capture-failed", "overlay", err.clone());
+                let _ = cancel_ocr_overlay(app.clone());
                 return Err(err);
             }
             Err(err) => {
                 let message = format!("ocr screenshot task failed: {err}");
                 emit_hotkey_trace(&app, "ocr-capture-failed", "overlay", message.clone());
+                let _ = cancel_ocr_overlay(app.clone());
                 return Err(message);
             }
         };
@@ -413,9 +596,9 @@ pub async fn submit_ocr_selection(
     let ocr_result = run_ocr_via_sidecar(
         &state.client,
         OcrPayload {
-            image_base64: png_base64,
-            source: source_language,
-            target: target_language,
+            image_base64: png_base64.clone(),
+            source: ocr_source_language.clone(),
+            target: effective_target_language.clone(),
         },
     )
     .await;
@@ -426,6 +609,7 @@ pub async fn submit_ocr_selection(
         Ok(result) => result.text.trim().to_owned(),
         Err(err) => {
             emit_hotkey_trace(&app, "ocr-sidecar-failed", "overlay", err.clone());
+            let _ = cancel_ocr_overlay(app.clone());
             return Err(err);
         }
     };
@@ -443,8 +627,151 @@ pub async fn submit_ocr_selection(
             "overlay",
             "sidecar returned empty text".to_owned(),
         );
+        let _ = cancel_ocr_overlay(app.clone());
         return Ok(());
     }
+
+    let overlay_word_count = count_words(&text);
+    let overlay_char_count = count_non_whitespace_chars(&text);
+    let default_overlay_routing = should_use_ocr_image_overlay(&text);
+    let use_overlay_flow = if overlay_word_count > 1 {
+        ocr_paragraph_display_mode == "image"
+    } else {
+        default_overlay_routing
+    };
+    emit_hotkey_trace(
+        &app,
+        "ocr-routing-decision",
+        "overlay",
+        format!(
+            "wordCount={overlay_word_count} charCount={overlay_char_count} defaultOverlay={default_overlay_routing} paragraphMode={} useOverlay={use_overlay_flow}",
+            ocr_paragraph_display_mode
+        ),
+    );
+
+    if use_overlay_flow {
+        emit_hotkey_trace(
+            &app,
+            "ocr-overlay-flow-start",
+            "overlay",
+            "multi-token OCR selection detected".to_owned(),
+        );
+
+        let mut overlay_text = text.clone();
+        let mut overlay_original_text = text.clone();
+        let mut overlay_image_base64 = png_base64.clone();
+        let mut overlay_original_text_len = text.chars().count();
+        let mut overlay_translated_text_len = 0usize;
+        let mut overlay_translation_applied = false;
+        let mut overlay_image_changed = false;
+
+        match run_ocr_overlay_via_sidecar(
+            &state.client,
+            OcrPayload {
+                image_base64: png_base64,
+                source: ocr_source_language.clone(),
+                target: effective_target_language.clone(),
+            },
+        )
+        .await
+        {
+            Ok(overlay) => {
+                let sidecar_original = overlay.text.trim();
+                let sidecar_translated = overlay.translated_text.trim();
+                overlay_original_text_len = sidecar_original.chars().count();
+                overlay_translated_text_len = sidecar_translated.chars().count();
+                if !sidecar_original.is_empty() {
+                    overlay_original_text = sidecar_original.to_owned();
+                }
+
+                if !overlay.error.trim().is_empty() {
+                    emit_hotkey_trace(
+                        &app,
+                        "ocr-overlay-sidecar-warn",
+                        "overlay",
+                        format!(
+                            "source={} target={} error={}",
+                            ocr_source_language,
+                            effective_target_language,
+                            overlay.error.trim()
+                        ),
+                    );
+                }
+
+                let translated = overlay.translated_text.trim();
+                if !translated.is_empty() {
+                    overlay_text = translated.to_owned();
+                }
+                overlay_translation_applied =
+                    !translated.is_empty() && translated != sidecar_original;
+
+                let overlay_image = overlay.image_base64.trim();
+                if overlay_image.is_empty() {
+                    emit_hotkey_trace(
+                        &app,
+                        "ocr-overlay-flow-fallback",
+                        "overlay",
+                        "sidecar returned empty overlay image, using captured region".to_owned(),
+                    );
+                } else {
+                    overlay_image_changed = overlay_image != overlay_image_base64;
+                    overlay_image_base64 = overlay_image.to_owned();
+                }
+
+                emit_hotkey_trace(
+                    &app,
+                    "ocr-overlay-sidecar-response",
+                    "overlay",
+                    format!(
+                        "source={} target={} originalTextLen={} translatedTextLen={} translationApplied={} imageOverlayChanged={} outputImageLen={}",
+                        ocr_source_language,
+                        effective_target_language,
+                        overlay_original_text_len,
+                        overlay_translated_text_len,
+                        overlay_translation_applied,
+                        overlay_image_changed,
+                        overlay_image_base64.len()
+                    ),
+                );
+            }
+            Err(err) => {
+                emit_hotkey_trace(
+                    &app,
+                    "ocr-overlay-flow-fallback",
+                    "overlay",
+                    format!("overlay generation failed, using captured region: {err}"),
+                );
+            }
+        }
+
+        let _ = app.emit(
+            "ocr-overlay-result-ready",
+            OcrOverlayResultEvent {
+                image_base64: overlay_image_base64,
+                text: overlay_text.clone(),
+                original_text: overlay_original_text,
+                left: logical_left,
+                top: logical_top,
+                width: logical_width,
+                height: logical_height,
+                source_language: ocr_source_language.clone(),
+                target_language: effective_target_language.clone(),
+                original_text_len: overlay_original_text_len,
+                translated_text_len: overlay_translated_text_len,
+                translation_applied: overlay_translation_applied,
+                image_overlay_changed: overlay_image_changed,
+            },
+        );
+        emit_hotkey_trace(
+            &app,
+            "ocr-overlay-flow-shown",
+            "overlay",
+            format!("result textLen={}", overlay_text.chars().count()),
+        );
+        return Ok(());
+    }
+
+    cancel_ocr_overlay(app.clone())?;
 
     let result = selection::show_popover_window(&app, text, "ocr".to_owned(), Some(anchor));
     match &result {
@@ -524,6 +851,49 @@ pub fn copy_text_to_clipboard(text: String) -> Result<(), String> {
     clipboard
         .set_text(text)
         .map_err(|err| format!("write clipboard failed: {err}"))
+}
+
+#[tauri::command]
+pub fn open_external_url(url: String) -> Result<(), String> {
+    let value = url.trim();
+    if value.is_empty() {
+        return Err("url is empty".to_owned());
+    }
+    if !value.starts_with("https://") && !value.starts_with("http://") {
+        return Err("only http/https urls are allowed".to_owned());
+    }
+    webbrowser::open(value)
+        .map(|_| ())
+        .map_err(|err| format!("open external url failed: {err}"))
+}
+
+#[tauri::command]
+pub fn copy_image_to_clipboard(image_base64: String) -> Result<(), String> {
+    let payload = image_base64.trim();
+    if payload.is_empty() {
+        return Err("image payload is empty".to_owned());
+    }
+
+    let bytes = BASE64_STANDARD
+        .decode(payload)
+        .map_err(|err| format!("decode image payload failed: {err}"))?;
+    let decoded = image::load_from_memory(&bytes)
+        .map_err(|err| format!("decode image bytes failed: {err}"))?;
+    let rgba = decoded.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    if width == 0 || height == 0 {
+        return Err("decoded image is empty".to_owned());
+    }
+
+    let mut clipboard =
+        arboard::Clipboard::new().map_err(|err| format!("open clipboard failed: {err}"))?;
+    clipboard
+        .set_image(arboard::ImageData {
+            width: width as usize,
+            height: height as usize,
+            bytes: Cow::Owned(rgba.into_raw()),
+        })
+        .map_err(|err| format!("write image clipboard failed: {err}"))
 }
 
 #[tauri::command]

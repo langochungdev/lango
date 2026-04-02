@@ -4,5 +4,6 @@ requests
 argostranslate
 langdetect
 easyocr
-pillow
+Pillow
+opencv-python
 numpy

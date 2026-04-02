@@ -8,6 +8,13 @@ $ErrorActionPreference = "Stop"
 $RootDir = Resolve-Path (Join-Path $PSScriptRoot "..")
 $DefaultPython = Join-Path $RootDir ".venv/Scripts/python.exe"
 $PythonBin = if ($env:PYTHON_BIN) { $env:PYTHON_BIN } elseif (Test-Path $DefaultPython) { $DefaultPython } else { "python" }
+$PackageManager = if ($env:DICTOVER_PACKAGE_MANAGER) {
+  $env:DICTOVER_PACKAGE_MANAGER
+} elseif (Get-Command pnpm -ErrorAction SilentlyContinue) {
+  "pnpm"
+} else {
+  "npm"
+}
 $QuickMode = -not $Full
 $StepTimes = [ordered]@{}
 $TotalTimer = [System.Diagnostics.Stopwatch]::StartNew()
@@ -134,6 +141,27 @@ $ReqPath = Join-Path $RootDir "sidecar/requirements.txt"
 $ReqStampPath = Join-Path $CacheDir "sidecar-requirements.sha256"
 $SidecarSourceStampPath = Join-Path $CacheDir "sidecar-source.sha256"
 $SidecarExe = Join-Path $RootDir "src-tauri/binaries/dictover-sidecar.exe"
+$OcrFontName = "NotoSansCJK-Regular.ttc"
+$BundledOcrFontPath = Join-Path $RootDir "src-tauri/binaries/$OcrFontName"
+$DefaultOcrFontSourcePath = Join-Path $RootDir "sidecar/fonts/$OcrFontName"
+$TauriIconIcoPath = Join-Path $RootDir "src-tauri/icons/icon.ico"
+$TauriIconIcnsPath = Join-Path $RootDir "src-tauri/icons/icon.icns"
+$TauriIconPngPath = Join-Path $RootDir "src-tauri/icons/icon.png"
+
+Run-Step "Validate Tauri bundle icons" {
+  $missing = @()
+  foreach ($path in @($TauriIconIcoPath, $TauriIconIcnsPath, $TauriIconPngPath)) {
+    if (-not (Test-Path $path)) {
+      $missing += $path
+    }
+  }
+
+  if ($missing.Count -gt 0) {
+    throw "Thieu icon bundle Tauri: $($missing -join ', '). Chay 'npm run tauri icon <source.png>' de tao lai icon truoc khi build."
+  }
+
+  Write-Host "  Icon bundle ready: $TauriIconIcoPath"
+}
 
 Run-Step "Install frontend dependencies (if lockfile changed)" {
   $currentLockHash = Get-FileHashSafe -Path $NpmLockPath
@@ -141,7 +169,12 @@ Run-Step "Install frontend dependencies (if lockfile changed)" {
   $mustInstall = (-not $QuickMode) -or ($currentLockHash -ne $savedLockHash) -or (-not (Test-Path (Join-Path $RootDir "node_modules")))
 
   if ($mustInstall) {
-    npm install
+    if ($PackageManager -eq "pnpm") {
+      pnpm install
+    }
+    else {
+      npm install
+    }
     if ($currentLockHash) {
       Set-StampValue -Path $NpmLockStampPath -Value $currentLockHash
     }
@@ -175,6 +208,29 @@ Run-Step "Install sidecar Python dependencies (if requirements changed)" {
   }
 }
 
+Run-Step "Ensure OCR font resource is bundled" {
+  if (Test-Path $BundledOcrFontPath) {
+    $fontSizeMb = [Math]::Round(((Get-Item $BundledOcrFontPath).Length / 1MB), 2)
+    Write-Host "  OCR font ready: $BundledOcrFontPath ($fontSizeMb MB)"
+    return
+  }
+
+  $fontSource = ""
+  if ($env:DICTOVER_OCR_FONT_SOURCE -and (Test-Path $env:DICTOVER_OCR_FONT_SOURCE)) {
+    $fontSource = $env:DICTOVER_OCR_FONT_SOURCE
+  } elseif (Test-Path $DefaultOcrFontSourcePath) {
+    $fontSource = $DefaultOcrFontSourcePath
+  }
+
+  if (-not $fontSource) {
+    throw "Khong tim thay $OcrFontName. Dat file tai sidecar/fonts/$OcrFontName hoac set env DICTOVER_OCR_FONT_SOURCE truoc khi build installer."
+  }
+
+  Copy-Item -Path $fontSource -Destination $BundledOcrFontPath -Force
+  $fontSizeMb = [Math]::Round(((Get-Item $BundledOcrFontPath).Length / 1MB), 2)
+  Write-Host "  Copied OCR font: $BundledOcrFontPath ($fontSizeMb MB)"
+}
+
 Run-Step "Build sidecar executable (if sidecar source changed)" {
   $sidecarFingerprint = Get-SidecarFingerprint -SidecarDir (Join-Path $RootDir "sidecar")
   $savedFingerprint = Get-StampValue -Path $SidecarSourceStampPath
@@ -196,7 +252,12 @@ Run-Step "Build sidecar executable (if sidecar source changed)" {
 }
 
 Run-Step "Build Windows installer (NSIS .exe only)" {
-  npm run tauri build -- --target $TargetTriple --bundles nsis
+  if ($PackageManager -eq "pnpm") {
+    pnpm run tauri build -- --target $TargetTriple --bundles nsis
+  }
+  else {
+    npm run tauri build -- --target $TargetTriple --bundles nsis
+  }
 }
 
 Run-Step "Collect installer artifacts" {

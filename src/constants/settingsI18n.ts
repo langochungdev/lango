@@ -28,6 +28,9 @@ export interface SettingsCopy {
   autoTranslateOnSelect: string;
   ocrShortcut: string;
   enableOcr: string;
+  ocrParagraphDisplayMode: string;
+  ocrDisplayImage: string;
+  ocrDisplayPopover: string;
   ocrLanguageHint: string;
   panelMode: string;
   autoPlayAudio: string;
@@ -85,6 +88,9 @@ const EN_COPY: SettingsCopy = {
   autoTranslateOnSelect: "Auto translate when selecting text",
   ocrShortcut: "OCR Shortcut",
   enableOcr: "Enable OCR Capture",
+  ocrParagraphDisplayMode: "OCR Paragraph Display",
+  ocrDisplayImage: "Image Overlay",
+  ocrDisplayPopover: "Popover",
   ocrLanguageHint:
     "OCR hotkey is smart: if text is selected it translates that text first; if no text is selected it opens OCR selection UI.",
   panelMode: "Open Panel Mode",
@@ -144,6 +150,9 @@ const VI_COPY: SettingsCopy = {
   autoTranslateOnSelect: "Tự động dịch khi tô chữ",
   ocrShortcut: "Phím tắt OCR",
   enableOcr: "Bật OCR từ vùng ảnh",
+  ocrParagraphDisplayMode: "Hiển thị OCR đoạn",
+  ocrDisplayImage: "Ảnh đè chữ dịch",
+  ocrDisplayPopover: "Popover",
   ocrLanguageHint:
     "Hotkey OCR hoạt động thông minh: nếu đang tô chữ thì ưu tiên dịch chữ đã tô; nếu không có chữ được tô thì mở UI OCR để chọn vùng ảnh.",
   panelMode: "Chế độ panel mở",
@@ -164,8 +173,8 @@ const VI_COPY: SettingsCopy = {
   quickCtrlEnterTranslateSend: "Ctrl+Enter: dịch rồi gửi",
   shortcutPlaceholder: "Focus rồi bấm phím",
   quickOutputSyncedHint: "(độc lập với output popover)",
-  modeOutput: "Theo đầu ra",
-  modeInput: "Theo đầu vào",
+  modeOutput: "Đầu ra",
+  modeInput: "Đầu vào",
   modeEnglish: "Tiếng Anh",
   popoverSectionTitle: "Cài đặt Popover",
   convertSectionTitle: "Cài đặt Convert Text",

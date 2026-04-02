@@ -1,7 +1,8 @@
 // Popover hiển thị kết quả tra từ điển hoặc dịch, với sub-panel tách biệt
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { invoke } from '@tauri-apps/api/core'
 import { createPortal } from 'react-dom'
-import type { PopoverState } from '@/hooks/usePopover'
+import type { OcrImageOverlayData, PopoverState } from '@/hooks/usePopover'
 import type { AutoPlayAudioMode, PopoverOpenPanelMode } from '@/types/settings'
 import type { DictionaryResult } from '@/services/dictionary'
 import type { TranslateResult } from '@/services/translate'
@@ -21,6 +22,7 @@ interface PopoverProps {
   lookupDisplayDefinition?: string | null
   dictionary: DictionaryResult | null
   translation: TranslateResult | null
+  ocrImageOverlay?: OcrImageOverlayData | null
   error: string | null
   panelMode: PopoverOpenPanelMode
   enableAudio: boolean
@@ -103,13 +105,15 @@ function useAudioPlayer(dictionary: DictionaryResult | null, selectedText: strin
   return { audioPlaying, audioError, playAudio, startAudio, stopAudio }
 }
 
-export function Popover({ state, selection, trigger, lookupDisplayWord, lookupDisplayDefinition, dictionary, translation, error, panelMode, enableAudio, autoPlayAudioMode, selectionAnchor, onOpenSettings, onRequestClose }: PopoverProps) {
+export function Popover({ state, selection, trigger, lookupDisplayWord, lookupDisplayDefinition, dictionary, translation, ocrImageOverlay, error, panelMode, enableAudio, autoPlayAudioMode, selectionAnchor, onOpenSettings, onRequestClose }: PopoverProps) {
   const [activePanel, setActivePanel] = useState<PopoverOpenPanelMode>('none')
   const [lockedPopoverWidth, setLockedPopoverWidth] = useState<number | null>(null)
   const [baselinePopoverWidth, setBaselinePopoverWidth] = useState<number | null>(null)
+  const [overlayCopyStatus, setOverlayCopyStatus] = useState<'idle' | 'textCopied' | 'imageCopied' | 'failed'>('idle')
   const popoverRef = useRef<HTMLElement | null>(null)
   const autoAudioKeyRef = useRef('')
   const widthSyncRafRef = useRef(0)
+  const overlayCopyStatusTimerRef = useRef<number | null>(null)
 
   const cleanSelection = normalizeText(selection)
   const selectedText = cleanSelection || 'Selection'
@@ -121,7 +125,62 @@ export function Popover({ state, selection, trigger, lookupDisplayWord, lookupDi
   const isParagraphTranslate = state === 'translate' && selectedWordCount > 1
   const isOcrParagraphTranslate = isOcrTrigger && isParagraphTranslate
   const isOcrLookup = isOcrTrigger && state === 'lookup'
+  const ocrOverlayImageSrc = useMemo(() => {
+    const payload = ocrImageOverlay?.imageBase64?.trim() ?? ''
+    if (!payload) {
+      return ''
+    }
+    return `data:image/png;base64,${payload}`
+  }, [ocrImageOverlay])
+  const ocrOverlayCopyText = useMemo(
+    () => normalizeText(ocrImageOverlay?.text || selection),
+    [ocrImageOverlay?.text, selection],
+  )
   const { audioError, playAudio, startAudio, stopAudio } = useAudioPlayer(dictionary, selectedText)
+
+  const flashOverlayCopyStatus = useCallback((next: 'textCopied' | 'imageCopied' | 'failed') => {
+    setOverlayCopyStatus(next)
+    if (overlayCopyStatusTimerRef.current !== null) {
+      window.clearTimeout(overlayCopyStatusTimerRef.current)
+    }
+    overlayCopyStatusTimerRef.current = window.setTimeout(() => {
+      setOverlayCopyStatus('idle')
+      overlayCopyStatusTimerRef.current = null
+    }, 1400)
+  }, [])
+
+  const copyOverlayText = useCallback(async () => {
+    if (!ocrOverlayCopyText) {
+      return
+    }
+
+    try {
+      if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+        await invoke('copy_text_to_clipboard', { text: ocrOverlayCopyText })
+      } else if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(ocrOverlayCopyText)
+      } else {
+        throw new Error('clipboard unavailable')
+      }
+      flashOverlayCopyStatus('textCopied')
+    } catch {
+      flashOverlayCopyStatus('failed')
+    }
+  }, [flashOverlayCopyStatus, ocrOverlayCopyText])
+
+  const copyOverlayImage = useCallback(async () => {
+    const imageBase64 = ocrImageOverlay?.imageBase64?.trim() ?? ''
+    if (!imageBase64) {
+      return
+    }
+
+    try {
+      await invoke('copy_image_to_clipboard', { imageBase64 })
+      flashOverlayCopyStatus('imageCopied')
+    } catch {
+      flashOverlayCopyStatus('failed')
+    }
+  }, [flashOverlayCopyStatus, ocrImageOverlay?.imageBase64])
 
   const readPopoverWidth = useCallback(() => {
     const width = popoverRef.current?.getBoundingClientRect().width ?? 0
@@ -163,11 +222,21 @@ export function Popover({ state, selection, trigger, lookupDisplayWord, lookupDi
   useEffect(() => { setActivePanel(panelMode) }, [panelMode, selection, state])
   useEffect(() => { setBaselinePopoverWidth(null); setLockedPopoverWidth(null) }, [selection])
   useEffect(() => {
+    setOverlayCopyStatus('idle')
+  }, [ocrImageOverlay?.imageBase64, ocrImageOverlay?.text])
+  useEffect(() => {
     if (state === 'idle' || state === 'loading') {
       autoAudioKeyRef.current = ''
       stopAudio()
     }
   }, [state, stopAudio])
+  useEffect(() => {
+    return () => {
+      if (overlayCopyStatusTimerRef.current !== null) {
+        window.clearTimeout(overlayCopyStatusTimerRef.current)
+      }
+    }
+  }, [])
 
   const compactLookupScore = useMemo(() => {
     if (state !== 'lookup' || !dictionary) {
@@ -190,6 +259,10 @@ export function Popover({ state, selection, trigger, lookupDisplayWord, lookupDi
   }, [state, translation])
 
   const minPopoverWidth = useMemo(() => {
+    if (state === 'ocrImage') {
+      return 540
+    }
+
     const lookupDefinitionDensity = Math.min(
       LOOKUP_DEFINITION_DENSITY_CAP,
       compactLookupScore.definition,
@@ -338,6 +411,12 @@ export function Popover({ state, selection, trigger, lookupDisplayWord, lookupDi
       return
     }
 
+    if (trigger === 'ocr' || trigger === 'ocr-image-overlay') {
+      autoAudioKeyRef.current = ''
+      stopAudio()
+      return
+    }
+
     let autoKey = ''
 
     if (state === 'lookup' && dictionary && (autoPlayAudioMode === 'word' || autoPlayAudioMode === 'all')) {
@@ -354,7 +433,7 @@ export function Popover({ state, selection, trigger, lookupDisplayWord, lookupDi
 
     autoAudioKeyRef.current = autoKey
     void startAudio()
-  }, [autoPlayAudioMode, dictionary, enableAudio, selectedText, startAudio, state, stopAudio, translation])
+  }, [autoPlayAudioMode, dictionary, enableAudio, selectedText, startAudio, state, stopAudio, translation, trigger])
 
   usePopoverResize(
     popoverRef,
@@ -394,7 +473,7 @@ export function Popover({ state, selection, trigger, lookupDisplayWord, lookupDi
       {createPortal(
         <section
           ref={popoverRef}
-          className={`apl-popover${isParagraphTranslate ? ' apl-popover--translate-paragraph' : ''}`}
+          className={`apl-popover${isParagraphTranslate ? ' apl-popover--translate-paragraph' : ''}${state === 'ocrImage' ? ' apl-popover--ocr-image' : ''}`}
           data-testid="popover"
           role="dialog"
           aria-modal="true"
@@ -443,6 +522,46 @@ export function Popover({ state, selection, trigger, lookupDisplayWord, lookupDi
                   <button type="button" className={`apl-button apl-image-toggle ${showImagePanel ? 'apl-image-toggle--active' : ''}`} aria-label="Open image panel" aria-pressed={showImagePanel} onClick={() => togglePanel('images')}><ImageIcon /></button>
                 <button type="button" className="apl-button apl-popover-settings" aria-label="Open settings" onClick={onOpenSettings} disabled={!onOpenSettings}><SettingsIcon /></button>
               </div>
+            </div>
+          )}
+
+          {state === 'ocrImage' && ocrImageOverlay && (
+            <div className="apl-body apl-ocr-image-overlay">
+              <div className="apl-ocr-image-overlay-frame">
+                {ocrOverlayImageSrc && (
+                  <img
+                    src={ocrOverlayImageSrc}
+                    alt="Translated OCR overlay"
+                    className="apl-ocr-image-overlay-image"
+                    draggable={false}
+                  />
+                )}
+              </div>
+              <div className="apl-ocr-image-overlay-actions" role="group" aria-label="OCR overlay actions">
+                <button
+                  type="button"
+                  className="apl-ocr-image-overlay-btn"
+                  onClick={() => void copyOverlayImage()}
+                  disabled={!ocrOverlayImageSrc}
+                >
+                  Copy image
+                </button>
+                <button
+                  type="button"
+                  className="apl-ocr-image-overlay-btn"
+                  onClick={() => void copyOverlayText()}
+                  disabled={!ocrOverlayCopyText}
+                >
+                  Copy text
+                </button>
+              </div>
+              {overlayCopyStatus !== 'idle' && (
+                <p className={`apl-ocr-image-overlay-status${overlayCopyStatus === 'failed' ? ' is-error' : ''}`}>
+                  {overlayCopyStatus === 'imageCopied' && 'Image copied'}
+                  {overlayCopyStatus === 'textCopied' && 'Text copied'}
+                  {overlayCopyStatus === 'failed' && 'Copy failed'}
+                </p>
+              )}
             </div>
           )}
 

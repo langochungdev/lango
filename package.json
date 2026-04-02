@@ -2,6 +2,7 @@
   "name": "dictover-desktop",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@10.25.0",
   "type": "module",
   "scripts": {
     "dev:desktop:win": "powershell -ExecutionPolicy Bypass -File scripts/dev.ps1",

@@ -8,3 +8,4 @@ src-tauri/target/
 src-tauri/binaries/
 *.tsbuildinfo
 .env
+sidecar/build/

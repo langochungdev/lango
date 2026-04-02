@@ -7,6 +7,7 @@ export type AutoPlayAudioMode = "off" | "word" | "all";
 export type PopoverTriggerMode = "auto" | "shortcut";
 export type PopoverOpenPanelMode = "none" | "details" | "images";
 export type PopoverDefinitionLanguageMode = "output" | "input" | "english";
+export type OcrParagraphDisplayMode = "image" | "popover";
 
 export interface AppSettings {
   enable_lookup: boolean;
@@ -28,6 +29,7 @@ export interface AppSettings {
   hotkey_translate_shortcut: string;
   enable_hotkey_translate: boolean;
   hotkey_translate_ctrl_enter_send: boolean;
+  ocr_paragraph_display_mode: OcrParagraphDisplayMode;
 }
 
 function isValidModifier(token: string): boolean {
@@ -109,7 +111,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   enable_audio: true,
   enable_ocr: true,
   auto_play_audio_mode: "off",
-  popover_trigger_mode: "auto",
+  popover_trigger_mode: "shortcut",
   popover_shortcut: "Ctrl+Shift+D",
   ocr_hotkey: "Alt+A",
   source_language: "en",
@@ -123,7 +125,41 @@ export const DEFAULT_SETTINGS: AppSettings = {
   hotkey_translate_shortcut: "Shift",
   enable_hotkey_translate: true,
   hotkey_translate_ctrl_enter_send: false,
+  ocr_paragraph_display_mode: "popover",
 };
+
+const INPUT_LANGUAGE_VALUES: ReadonlyArray<InputLanguageCode> = [
+  "auto",
+  "vi",
+  "en",
+  "zh-CN",
+  "ja",
+  "ko",
+  "ru",
+  "de",
+  "fr",
+  "fi",
+];
+
+const OUTPUT_LANGUAGE_VALUES: ReadonlyArray<OutputLanguageCode> = [
+  "vi",
+  "en",
+  "zh-CN",
+  "ja",
+  "ko",
+  "ru",
+  "de",
+  "fr",
+  "fi",
+];
+
+function isInputLanguageCode(value: string): value is InputLanguageCode {
+  return INPUT_LANGUAGE_VALUES.includes(value as InputLanguageCode);
+}
+
+function isOutputLanguageCode(value: string): value is OutputLanguageCode {
+  return OUTPUT_LANGUAGE_VALUES.includes(value as OutputLanguageCode);
+}
 
 export function sanitizeSettings(partial: Partial<AppSettings>): AppSettings {
   const merged = { ...DEFAULT_SETTINGS, ...partial };
@@ -147,24 +183,53 @@ export function sanitizeSettings(partial: Partial<AppSettings>): AppSettings {
     true,
   );
   const audioMode =
-    merged.auto_play_audio_mode || DEFAULT_SETTINGS.auto_play_audio_mode;
+    merged.auto_play_audio_mode === "word" ||
+    merged.auto_play_audio_mode === "all" ||
+    merged.auto_play_audio_mode === "off"
+      ? merged.auto_play_audio_mode
+      : DEFAULT_SETTINGS.auto_play_audio_mode;
   const triggerMode =
-    merged.popover_trigger_mode === "shortcut" ? "shortcut" : "auto";
+    merged.popover_trigger_mode === "auto" ||
+    merged.popover_trigger_mode === "shortcut"
+      ? merged.popover_trigger_mode
+      : DEFAULT_SETTINGS.popover_trigger_mode;
   const panelMode =
-    merged.popover_open_panel_mode || DEFAULT_SETTINGS.popover_open_panel_mode;
+    merged.popover_open_panel_mode === "details" ||
+    merged.popover_open_panel_mode === "images" ||
+    merged.popover_open_panel_mode === "none"
+      ? merged.popover_open_panel_mode
+      : DEFAULT_SETTINGS.popover_open_panel_mode;
   const languageMode =
-    merged.popover_definition_language_mode ||
-    DEFAULT_SETTINGS.popover_definition_language_mode;
+    merged.popover_definition_language_mode === "input" ||
+    merged.popover_definition_language_mode === "english" ||
+    merged.popover_definition_language_mode === "output"
+      ? merged.popover_definition_language_mode
+      : DEFAULT_SETTINGS.popover_definition_language_mode;
+  const ocrParagraphDisplayMode =
+    merged.ocr_paragraph_display_mode === "popover" ||
+    merged.ocr_paragraph_display_mode === "image"
+      ? merged.ocr_paragraph_display_mode
+      : DEFAULT_SETTINGS.ocr_paragraph_display_mode;
   const sourceLanguage =
-    merged.source_language || DEFAULT_SETTINGS.source_language;
+    typeof merged.source_language === "string" &&
+    isInputLanguageCode(merged.source_language)
+      ? merged.source_language
+      : DEFAULT_SETTINGS.source_language;
   const targetLanguage =
-    merged.target_language || DEFAULT_SETTINGS.target_language;
+    typeof merged.target_language === "string" &&
+    isOutputLanguageCode(merged.target_language)
+      ? merged.target_language
+      : DEFAULT_SETTINGS.target_language;
   const quickTranslateSourceLanguage =
-    merged.quick_translate_source_language ||
-    DEFAULT_SETTINGS.quick_translate_source_language;
+    typeof merged.quick_translate_source_language === "string" &&
+    isInputLanguageCode(merged.quick_translate_source_language)
+      ? merged.quick_translate_source_language
+      : DEFAULT_SETTINGS.quick_translate_source_language;
   const quickTranslateTargetLanguage =
-    merged.quick_translate_target_language ||
-    DEFAULT_SETTINGS.quick_translate_target_language;
+    typeof merged.quick_translate_target_language === "string" &&
+    isOutputLanguageCode(merged.quick_translate_target_language)
+      ? merged.quick_translate_target_language
+      : DEFAULT_SETTINGS.quick_translate_target_language;
 
   return {
     ...merged,
@@ -188,5 +253,6 @@ export function sanitizeSettings(partial: Partial<AppSettings>): AppSettings {
     enable_hotkey_translate: merged.enable_hotkey_translate !== false,
     hotkey_translate_ctrl_enter_send:
       merged.hotkey_translate_ctrl_enter_send === true,
+    ocr_paragraph_display_mode: ocrParagraphDisplayMode,
   };
 }
