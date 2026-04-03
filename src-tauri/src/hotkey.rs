@@ -524,16 +524,6 @@ pub async fn handle_ctrl_enter_intercepted(app: AppHandle) -> Result<(), String>
         guard.clone()
     };
 
-    if !config.enable_hotkey_translate {
-        emit_hotkey_trace(
-            &app,
-            "ctrl-enter-intercept-skip",
-            "Ctrl+Enter",
-            "reason=convert-hotkey-disabled".to_owned(),
-        );
-        return Ok(());
-    }
-
     if !config.hotkey_translate_ctrl_enter_send {
         emit_hotkey_trace(
             &app,

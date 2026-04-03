@@ -102,7 +102,7 @@ impl Default for AppConfig {
             ocr_hotkey: "Alt+A".to_owned(),
             source_language: "en".to_owned(),
             target_language: "vi".to_owned(),
-            quick_translate_source_language: "auto".to_owned(),
+            quick_translate_source_language: "vi".to_owned(),
             quick_translate_target_language: "en".to_owned(),
             max_definitions: 3,
             show_example: true,
@@ -144,7 +144,7 @@ impl AppConfig {
             next.quick_translate_source_language.as_str(),
             "auto" | "vi" | "en" | "zh-CN" | "ja" | "ko" | "ru" | "de" | "fr" | "fi"
         ) {
-            next.quick_translate_source_language = "auto".to_owned();
+            next.quick_translate_source_language = "vi".to_owned();
         }
         if !matches!(
             next.quick_translate_target_language.as_str(),

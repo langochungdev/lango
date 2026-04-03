@@ -154,7 +154,6 @@ export function SettingsPanel({ open, settings, onChange }: SettingsPanelProps) 
     })
   }
 
-  const convertEnabled = settings.enable_hotkey_translate
   const profileUrl = 'https://langochung.me'
 
   const handleProfileClick = async (event: MouseEvent<HTMLAnchorElement>) => {
@@ -290,7 +289,7 @@ export function SettingsPanel({ open, settings, onChange }: SettingsPanelProps) 
             </div>
           </article>
 
-          <article className={`apl-settings-card ${convertEnabled ? '' : 'is-disabled'}`}>
+          <article className="apl-settings-card">
             <div className="apl-settings-card-header">
               <div className="apl-settings-card-title">{copy.convertSectionTitle}</div>
             </div>
@@ -300,7 +299,6 @@ export function SettingsPanel({ open, settings, onChange }: SettingsPanelProps) 
                   <span>{copy.quickInputLanguage}</span>
                   <select
                     value={settings.quick_translate_source_language}
-                    disabled={!convertEnabled}
                     onChange={(e) => onChange(setField(settings, 'quick_translate_source_language', e.target.value as AppSettings['quick_translate_source_language']))}
                   >
                     {INPUT_LANGUAGES.map((lang) => (
@@ -309,13 +307,12 @@ export function SettingsPanel({ open, settings, onChange }: SettingsPanelProps) 
                   </select>
                 </label>
 
-                <button type="button" className="apl-settings-swap-languages" aria-label={copy.swapLanguages} onClick={swapQuickLanguages} disabled={!convertEnabled}>⇄</button>
+                <button type="button" className="apl-settings-swap-languages" aria-label={copy.swapLanguages} onClick={swapQuickLanguages}>⇄</button>
 
                 <label className="apl-settings-field">
                   <span>{copy.quickOutputLanguage}</span>
                   <select
                     value={settings.quick_translate_target_language}
-                    disabled={!convertEnabled}
                     onChange={(e) => onChange(setField(settings, 'quick_translate_target_language', e.target.value as AppSettings['quick_translate_target_language']))}
                   >
                     {OUTPUT_LANGUAGES.map((lang) => (
@@ -329,7 +326,6 @@ export function SettingsPanel({ open, settings, onChange }: SettingsPanelProps) 
                 <input
                   type="checkbox"
                   checked={settings.hotkey_translate_ctrl_enter_send}
-                  disabled={!convertEnabled}
                   onChange={(event) => onChange(setField(settings, 'hotkey_translate_ctrl_enter_send', event.target.checked))}
                 />
                 <span>{copy.quickCtrlEnterTranslateSend}</span>
@@ -351,7 +347,6 @@ export function SettingsPanel({ open, settings, onChange }: SettingsPanelProps) 
                     size={shortcutInputSize(settings.hotkey_translate_shortcut)}
                     placeholder={copy.shortcutPlaceholder}
                     readOnly
-                    disabled={!convertEnabled}
                     onKeyDown={handleShortcutCapture('hotkey_translate_shortcut')}
                   />
                 </label>

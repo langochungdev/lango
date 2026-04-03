@@ -1369,6 +1369,12 @@ button {
     width: fit-content;
     max-width: 100%;
     justify-self: start;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+
+.apl-settings-hotkey-merged:focus-within {
+    border-color: var(--apl-settings-accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--apl-settings-accent) 22%, transparent);
 }
 
 .apl-settings-hotkey-merged input[type='checkbox'] {
@@ -1406,6 +1412,11 @@ button {
     outline: none;
     padding: 0 8px;
     flex-shrink: 0;
+    cursor: pointer;
+}
+
+.apl-settings-hotkey-merged input[type='text']:focus-visible {
+    background: color-mix(in srgb, var(--apl-settings-accent-soft) 70%, transparent);
 }
 
 .apl-settings-hotkey-merged input[type='text']:disabled {

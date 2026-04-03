@@ -116,7 +116,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ocr_hotkey: "Alt+A",
   source_language: "en",
   target_language: "vi",
-  quick_translate_source_language: "auto",
+  quick_translate_source_language: "vi",
   quick_translate_target_language: "en",
   max_definitions: 3,
   show_example: true,

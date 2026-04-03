@@ -1,5 +1,5 @@
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
-use reqwest::{header, Client};
+use reqwest::Client;
 use screenshots::image;
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -36,16 +36,16 @@ pub struct UpdateAvailablePayload {
 }
 
 #[derive(Debug, Deserialize)]
-struct GithubRelease {
-    tag_name: String,
-    draft: bool,
+struct VersionManifest {
+    version: String,
+    #[serde(default)]
     prerelease: bool,
+    #[serde(default)]
+    url: Option<String>,
 }
 
-const GITHUB_RELEASES_API: &str =
-    "https://api.github.com/repos/langochungdev/dictover-desktop/releases?per_page=5";
+const VERSION_MANIFEST_URL: &str = "https://dictover.langochung.me/version.json";
 const DEFAULT_RELEASES_PAGE: &str = "https://dictover.langochung.me/releases";
-const GITHUB_API_VERSION: &str = "2022-11-28";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranslatePayload {
@@ -356,56 +356,36 @@ async fn compute_update_payload(
     client: &Client,
     current_version: &str,
 ) -> Result<Option<UpdateAvailablePayload>, String> {
-    let latest_release = fetch_latest_release(client).await?;
-    let Some(release) = latest_release else {
-        return Ok(None);
-    };
+    let manifest = fetch_version_manifest(client).await?;
+    let latest_version = manifest.version.trim().to_owned();
 
-    if !is_newer_version(current_version, &release.tag_name) {
+    if latest_version.is_empty() {
+        return Err("version manifest has empty version".to_owned());
+    }
+
+    if !is_newer_version(current_version, &latest_version) {
         return Ok(None);
     }
 
     Ok(Some(UpdateAvailablePayload {
         current_version: current_version.to_owned(),
-        latest_version: release.tag_name,
-        url: DEFAULT_RELEASES_PAGE.to_owned(),
-        prerelease: release.prerelease,
+        latest_version,
+        url: manifest
+            .url
+            .unwrap_or_else(|| DEFAULT_RELEASES_PAGE.to_owned()),
+        prerelease: manifest.prerelease,
     }))
 }
 
-async fn fetch_latest_release(client: &Client) -> Result<Option<GithubRelease>, String> {
+async fn fetch_version_manifest(client: &Client) -> Result<VersionManifest, String> {
     let response = client
-        .get(GITHUB_RELEASES_API)
-        .header(header::ACCEPT, "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
-        .header(
-            header::USER_AGENT,
-            format!("DictOver-Desktop/{}", env!("CARGO_PKG_VERSION")),
-        )
+        .get(VERSION_MANIFEST_URL)
         .send()
         .await
-        .map_err(|err| format!("github release request failed: {err}"))?;
+        .map_err(|err| format!("version manifest request failed: {err}"))?;
 
     let status = response.status();
     if !status.is_success() {
-        let rate_remaining = response
-            .headers()
-            .get("x-ratelimit-remaining")
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or("unknown")
-            .to_owned();
-        let rate_reset = response
-            .headers()
-            .get("x-ratelimit-reset")
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or("unknown")
-            .to_owned();
-        let request_id = response
-            .headers()
-            .get("x-github-request-id")
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or("unknown")
-            .to_owned();
         let body = response
             .text()
             .await
@@ -414,16 +394,16 @@ async fn fetch_latest_release(client: &Client) -> Result<Option<GithubRelease>, 
             .replace('\r', " ");
         let body_preview: String = body.chars().take(260).collect();
         return Err(format!(
-            "github release request failed with status {status} | ratelimit_remaining={rate_remaining} ratelimit_reset={rate_reset} request_id={request_id} | body={body_preview}"
+            "version manifest request failed with status {status} | body={body_preview}"
         ));
     }
 
-    let releases = response
-        .json::<Vec<GithubRelease>>()
+    let manifest = response
+        .json::<VersionManifest>()
         .await
-        .map_err(|err| format!("github release decode failed: {err}"))?;
+        .map_err(|err| format!("version manifest decode failed: {err}"))?;
 
-    Ok(releases.into_iter().find(|release| !release.draft))
+    Ok(manifest)
 }
 
 pub async fn check_for_updates_and_emit(app: AppHandle) {
