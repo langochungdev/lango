@@ -10,3 +10,4 @@ src-tauri/binaries/
 .env
 sidecar/build/
 results/*.exe
+results/*.zip

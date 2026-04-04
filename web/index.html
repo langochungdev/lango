@@ -357,19 +357,25 @@
                 <video class="preview-video" preload="metadata" playsinline muted>
                     <source src="https://www.w3schools.com/html/mov_bbb.webm" type="video/webm">
                 </video>
-                <div class="video-overlay"><span class="video-overlay-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 6v12l10-6z"></path></svg></span></div>
+                <div class="video-overlay"><span class="video-overlay-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M8 6v12l10-6z"></path>
+                        </svg></span></div>
             </div>
             <div class="flex-1 bg-[#1a1a1a] rounded-xl overflow-hidden relative group card-shadow gif-container" data-video-frame>
                 <video class="preview-video" preload="metadata" playsinline muted>
                     <source src="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.webm" type="video/webm">
                 </video>
-                <div class="video-overlay"><span class="video-overlay-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 6v12l10-6z"></path></svg></span></div>
+                <div class="video-overlay"><span class="video-overlay-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M8 6v12l10-6z"></path>
+                        </svg></span></div>
             </div>
             <div class="flex-1 bg-[#1a1a1a] rounded-xl overflow-hidden relative group card-shadow gif-container" data-video-frame>
                 <video class="preview-video" preload="metadata" playsinline muted>
                     <source src="https://media.w3.org/2010/05/sintel/trailer_hd.webm" type="video/webm">
                 </video>
-                <div class="video-overlay"><span class="video-overlay-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 6v12l10-6z"></path></svg></span></div>
+                <div class="video-overlay"><span class="video-overlay-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M8 6v12l10-6z"></path>
+                        </svg></span></div>
             </div>
         </div>
 
@@ -540,7 +546,6 @@
     </main>
 
     <script>
-        const RELEASES_API = 'https://api.github.com/repos/langochungdev/dictover-desktop/releases?per_page=6';
         const RELEASE_BASE = 'https://github.com/langochungdev/dictover-desktop/releases';
 
         function parseVersion(value) {
@@ -553,7 +558,7 @@
 
         async function applyVersionFallback(link) {
             try {
-                const response = await fetch('./version.json', { cache: 'no-store' });
+                const response = await fetch('/version.json', { cache: 'no-store' });
                 if (!response.ok) {
                     link.href = `${RELEASE_BASE}/latest`;
                     return;
@@ -579,41 +584,6 @@
             }
 
             await applyVersionFallback(link);
-
-            try {
-                const response = await fetch(RELEASES_API, {
-                    headers: { Accept: 'application/vnd.github+json' }
-                });
-                if (!response.ok) {
-                    return;
-                }
-
-                const releases = await response.json();
-                if (!Array.isArray(releases)) {
-                    return;
-                }
-
-                const latest = releases.find((release) => Array.isArray(release?.assets) && release.assets.length > 0);
-                if (!latest) {
-                    return;
-                }
-
-                const zipAsset = latest.assets.find((asset) => {
-                    const name = typeof asset?.name === 'string' ? asset.name : '';
-                    return /^DictOver-.*\.zip$/i.test(name);
-                });
-
-                if (zipAsset && typeof zipAsset.browser_download_url === 'string' && zipAsset.browser_download_url) {
-                    link.href = zipAsset.browser_download_url;
-                    return;
-                }
-
-                if (typeof latest.html_url === 'string' && latest.html_url) {
-                    link.href = latest.html_url;
-                }
-            } catch {
-                return;
-            }
         }
 
         void resolveLatestDownloadLink();
