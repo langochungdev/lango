@@ -278,9 +278,21 @@ async def warmup_endpoint(req: WarmupRequest) -> dict:
     except Exception as exc:
         status["lookup"] = {"ok": 0, "error": str(exc)}
 
+    required_checks = (
+        status.get("argos_translate"),
+        status.get("api_translate"),
+        status.get("quick_convert"),
+        status.get("lookup"),
+    )
+    ready = all(
+        isinstance(item, dict) and int(item.get("ok") or 0) == 1
+        for item in required_checks
+    )
+
     return {
         "source": source,
         "target": target,
+        "ready": ready,
         "status": status,
     }
 

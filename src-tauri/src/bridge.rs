@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::borrow::Cow;
 use std::collections::HashSet;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tauri::{
     AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, Position, Size, State,
 };
@@ -50,6 +52,12 @@ const VERSION_MANIFEST_URL: &str = "https://dictover.langochung.me/version.json"
 const DEFAULT_RELEASES_PAGE: &str = "https://dictover.langochung.me/releases";
 const QUICK_CONVERT_BASE_WIDTH: f64 = 520.0;
 const QUICK_CONVERT_BASE_HEIGHT: f64 = 360.0;
+const SIDECAR_HEALTH_WAIT_TIMEOUT_MS: u64 = 2600;
+const SIDECAR_HEALTH_REQUEST_TIMEOUT_MS: u64 = 700;
+const SIDECAR_HEALTH_RETRY_BASE_MS: u64 = 80;
+const SIDECAR_WARMUP_REQUEST_TIMEOUT_MS: u64 = 18000;
+const SIDECAR_WARMUP_MAX_ATTEMPTS: u8 = 3;
+const SIDECAR_WARMUP_RETRY_BASE_MS: u64 = 140;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranslatePayload {
@@ -62,6 +70,37 @@ pub struct TranslatePayload {
 struct WarmupPayload {
     source: String,
     target: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct WarmupResponsePayload {
+    #[serde(default)]
+    source: String,
+    #[serde(default)]
+    target: String,
+    #[serde(default)]
+    ready: Option<bool>,
+    #[serde(default)]
+    status: Value,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SidecarReadinessPayload {
+    stage: String,
+    ready: bool,
+    attempts: u8,
+    elapsed_ms: u64,
+    detail: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SidecarWarmupStatusPayload {
+    stage: String,
+    source: String,
+    target: String,
+    ready: bool,
+    attempts: u8,
+    detail: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -249,11 +288,183 @@ pub async fn translate_via_sidecar(
         .map_err(|err| format!("sidecar translate decode failed: {err}"))
 }
 
+fn sidecar_health_target() -> (String, u16) {
+    let host = std::env::var("SIDECAR_HOST").unwrap_or_else(|_| "127.0.0.1".to_owned());
+    let port = std::env::var("SIDECAR_PORT")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(49152);
+    (host, port)
+}
+
+fn sidecar_warmup_endpoint() -> String {
+    std::env::var("SIDECAR_WARMUP_URL").unwrap_or_else(|_| {
+        let host = std::env::var("SIDECAR_HOST").unwrap_or_else(|_| "127.0.0.1".to_owned());
+        let port = std::env::var("SIDECAR_PORT").unwrap_or_else(|_| "49152".to_owned());
+        format!("http://{host}:{port}/warmup")
+    })
+}
+
+fn warmup_status_ok(status: &Value, key: &str) -> Option<bool> {
+    status
+        .as_object()
+        .and_then(|obj| obj.get(key))
+        .and_then(|value| value.as_object())
+        .and_then(|entry| entry.get("ok"))
+        .and_then(|ok| ok.as_i64())
+        .map(|ok| ok == 1)
+}
+
+fn warmup_response_ready(payload: &WarmupResponsePayload) -> bool {
+    if let Some(ready) = payload.ready {
+        return ready;
+    }
+
+    let mut saw_any = false;
+    for key in [
+        "argos_translate",
+        "api_translate",
+        "quick_convert",
+        "lookup",
+    ] {
+        if let Some(ok) = warmup_status_ok(&payload.status, key) {
+            saw_any = true;
+            if !ok {
+                return false;
+            }
+        }
+    }
+
+    saw_any
+}
+
+fn warmup_status_summary(payload: &WarmupResponsePayload) -> String {
+    let to_flag = |value: Option<bool>| match value {
+        Some(true) => "1",
+        Some(false) => "0",
+        None => "?",
+    };
+
+    format!(
+        "argos={} api={} quick={} lookup={}",
+        to_flag(warmup_status_ok(&payload.status, "argos_translate")),
+        to_flag(warmup_status_ok(&payload.status, "api_translate")),
+        to_flag(warmup_status_ok(&payload.status, "quick_convert")),
+        to_flag(warmup_status_ok(&payload.status, "lookup")),
+    )
+}
+
+fn emit_sidecar_readiness(
+    app: &AppHandle,
+    stage: &str,
+    ready: bool,
+    attempts: u8,
+    elapsed_ms: u64,
+    detail: String,
+) {
+    let _ = app.emit(
+        "sidecar-readiness",
+        SidecarReadinessPayload {
+            stage: stage.to_owned(),
+            ready,
+            attempts,
+            elapsed_ms,
+            detail,
+        },
+    );
+}
+
+pub fn wait_for_sidecar_health(app: &AppHandle, stage: &str) -> bool {
+    let (host, port) = sidecar_health_target();
+    let endpoint = format!("{host}:{port}");
+    let started_at = Instant::now();
+    let deadline = started_at + Duration::from_millis(SIDECAR_HEALTH_WAIT_TIMEOUT_MS);
+    let mut attempts: u8 = 0;
+    let mut delay_ms = SIDECAR_HEALTH_RETRY_BASE_MS;
+    let mut last_detail: Option<String> = None;
+
+    loop {
+        attempts = attempts.saturating_add(1);
+        let mut connected = false;
+        match endpoint.to_socket_addrs() {
+            Ok(addresses) => {
+                for addr in addresses {
+                    if TcpStream::connect_timeout(
+                        &addr,
+                        Duration::from_millis(SIDECAR_HEALTH_REQUEST_TIMEOUT_MS),
+                    )
+                    .is_ok()
+                    {
+                        connected = true;
+                        break;
+                    }
+                }
+            }
+            Err(err) => {
+                if last_detail.is_none() {
+                    last_detail = Some(format!("endpoint={endpoint} resolve-failed={err}"));
+                }
+            }
+        }
+
+        if connected {
+            let elapsed_ms = started_at.elapsed().as_millis() as u64;
+            emit_sidecar_readiness(
+                app,
+                stage,
+                true,
+                attempts,
+                elapsed_ms,
+                format!("endpoint={endpoint} tcp-ready=1"),
+            );
+            return true;
+        }
+
+        if last_detail.is_none() {
+            last_detail = Some(format!("endpoint={endpoint} tcp-ready=0"));
+        }
+
+        if Instant::now() >= deadline {
+            break;
+        }
+
+        std::thread::sleep(Duration::from_millis(delay_ms));
+        delay_ms = (delay_ms * 2).min(320);
+    }
+
+    let elapsed_ms = started_at.elapsed().as_millis() as u64;
+    emit_sidecar_readiness(
+        app,
+        stage,
+        false,
+        attempts,
+        elapsed_ms,
+        last_detail.unwrap_or_else(|| "health-check-timeout".to_owned()),
+    );
+    false
+}
+
 fn normalize_warmup_source(source: &str) -> String {
     if source.trim() == "auto" {
         "en".to_owned()
     } else {
         source.trim().to_owned()
+    }
+}
+
+fn push_warmup_pair(
+    seen: &mut HashSet<String>,
+    pairs: &mut Vec<(String, String)>,
+    source: String,
+    target: String,
+) {
+    if source.is_empty() || target.is_empty() {
+        return;
+    }
+
+    let key = format!("{}->{}", source, target);
+    if seen.insert(key) {
+        pairs.push((source, target));
     }
 }
 
@@ -264,18 +475,28 @@ fn warmup_pairs_from_config(config: &AppConfig) -> Vec<(String, String)> {
     let popover_source = normalize_warmup_source(&config.source_language);
     let popover_target = config.target_language.trim().to_owned();
     if !popover_source.is_empty() && !popover_target.is_empty() {
-        let key = format!("{}->{}", popover_source, popover_target);
-        if seen.insert(key) {
-            pairs.push((popover_source, popover_target));
+        push_warmup_pair(
+            &mut seen,
+            &mut pairs,
+            popover_source.clone(),
+            popover_target.clone(),
+        );
+        if popover_source != popover_target {
+            push_warmup_pair(&mut seen, &mut pairs, popover_target, popover_source);
         }
     }
 
     let quick_source = normalize_warmup_source(&config.quick_translate_source_language);
     let quick_target = config.quick_translate_target_language.trim().to_owned();
     if !quick_source.is_empty() && !quick_target.is_empty() {
-        let key = format!("{}->{}", quick_source, quick_target);
-        if seen.insert(key) {
-            pairs.push((quick_source, quick_target));
+        push_warmup_pair(
+            &mut seen,
+            &mut pairs,
+            quick_source.clone(),
+            quick_target.clone(),
+        );
+        if quick_source != quick_target {
+            push_warmup_pair(&mut seen, &mut pairs, quick_target, quick_source);
         }
     }
 
@@ -289,29 +510,96 @@ fn warmup_languages_changed(previous: &AppConfig, next: &AppConfig) -> bool {
         || previous.quick_translate_target_language != next.quick_translate_target_language
 }
 
-async fn warmup_pair_via_sidecar(client: &Client, source: String, target: String) {
-    let endpoint = std::env::var("SIDECAR_WARMUP_URL").unwrap_or_else(|_| {
-        let host = std::env::var("SIDECAR_HOST").unwrap_or_else(|_| "127.0.0.1".to_owned());
-        let port = std::env::var("SIDECAR_PORT").unwrap_or_else(|_| "49152".to_owned());
-        format!("http://{host}:{port}/warmup")
-    });
+async fn warmup_pair_via_sidecar(
+    client: &Client,
+    stage: &str,
+    source: String,
+    target: String,
+) -> SidecarWarmupStatusPayload {
+    let endpoint = sidecar_warmup_endpoint();
+    let mut attempts: u8 = 0;
+    let mut delay_ms = SIDECAR_WARMUP_RETRY_BASE_MS;
+    let mut last_detail = "warmup-not-started".to_owned();
 
-    let _ = client
-        .post(endpoint)
-        .json(&WarmupPayload { source, target })
-        .send()
-        .await;
+    for attempt in 1..=SIDECAR_WARMUP_MAX_ATTEMPTS {
+        attempts = attempt;
+        let result = client
+            .post(endpoint.clone())
+            .json(&WarmupPayload {
+                source: source.clone(),
+                target: target.clone(),
+            })
+            .timeout(Duration::from_millis(SIDECAR_WARMUP_REQUEST_TIMEOUT_MS))
+            .send()
+            .await;
+
+        match result {
+            Ok(response) => {
+                let status_code = response.status().as_u16();
+                match response.json::<WarmupResponsePayload>().await {
+                    Ok(payload) => {
+                        let ready = warmup_response_ready(&payload);
+                        let summary = warmup_status_summary(&payload);
+                        let payload_source = if payload.source.trim().is_empty() {
+                            source.clone()
+                        } else {
+                            payload.source
+                        };
+                        let payload_target = if payload.target.trim().is_empty() {
+                            target.clone()
+                        } else {
+                            payload.target
+                        };
+                        let detail =
+                            format!("endpoint={endpoint} status={status_code} {}", summary);
+                        return SidecarWarmupStatusPayload {
+                            stage: stage.to_owned(),
+                            source: payload_source,
+                            target: payload_target,
+                            ready,
+                            attempts,
+                            detail,
+                        };
+                    }
+                    Err(err) => {
+                        last_detail =
+                            format!("endpoint={endpoint} status={status_code} decode-failed={err}");
+                    }
+                }
+            }
+            Err(err) => {
+                last_detail = format!("endpoint={endpoint} request-failed={err}");
+            }
+        }
+
+        if attempt < SIDECAR_WARMUP_MAX_ATTEMPTS {
+            std::thread::sleep(Duration::from_millis(delay_ms));
+            delay_ms = (delay_ms * 2).min(520);
+        }
+    }
+
+    SidecarWarmupStatusPayload {
+        stage: stage.to_owned(),
+        source,
+        target,
+        ready: false,
+        attempts,
+        detail: last_detail,
+    }
 }
 
-pub fn schedule_language_warmup(client: Client, config: AppConfig) {
+pub fn schedule_language_warmup(app: AppHandle, client: Client, config: AppConfig, stage: &str) {
     let pairs = warmup_pairs_from_config(&config);
     if pairs.is_empty() {
         return;
     }
 
+    let stage = stage.to_owned();
+
     tauri::async_runtime::spawn(async move {
         for (source, target) in pairs {
-            warmup_pair_via_sidecar(&client, source, target).await;
+            let payload = warmup_pair_via_sidecar(&client, &stage, source, target).await;
+            let _ = app.emit("sidecar-warmup-status", payload);
         }
     });
 }
@@ -992,7 +1280,13 @@ pub async fn save_config(
     config::save_config_to_disk(&app, &clean)?;
     hotkey::register_hotkeys(&app, &clean)?;
     if warmup_languages_changed(&previous, &clean) {
-        schedule_language_warmup(state.client.clone(), clean.clone());
+        let _ = wait_for_sidecar_health(&app, "settings-change");
+        schedule_language_warmup(
+            app.clone(),
+            state.client.clone(),
+            clean.clone(),
+            "settings-change",
+        );
     }
     let _ = app.emit("settings-updated", clean.clone());
     Ok(clean)

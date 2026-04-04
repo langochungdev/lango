@@ -681,30 +681,84 @@ async fn on_quick_convert_triggered(
     config: AppConfig,
     shortcut: String,
 ) -> Result<(), String> {
-    let selected = capture_selection_text_stable().await?;
-    let seed_text = selected.trim().to_owned();
+    if let Some(window) = app.get_webview_window("quick-convert") {
+        let is_visible = window
+            .is_visible()
+            .map_err(|err| format!("read quick convert visibility failed: {err}"))?;
+
+        if is_visible {
+            emit_hotkey_trace(
+                &app,
+                "quick-convert-hide",
+                &shortcut,
+                "reason=toggle-visible".to_owned(),
+            );
+            return bridge::hide_quick_convert_window(app);
+        }
+    }
 
     emit_hotkey_trace(
         &app,
         "quick-convert-open",
         &shortcut,
         format!(
-            "position={} seedLen={}",
-            config.quick_convert_popup_position,
-            seed_text.chars().count()
+            "position={} seedLen={} mode=immediate-open",
+            config.quick_convert_popup_position, 0
         ),
     );
 
     bridge::show_quick_convert_window_with_seed(
         &app,
         &config.quick_convert_popup_position,
-        if seed_text.is_empty() {
-            None
-        } else {
-            Some(seed_text)
-        },
-        Some(shortcut),
-    )
+        None,
+        Some(shortcut.clone()),
+    )?;
+
+    let app_for_seed = app.clone();
+    let shortcut_for_seed = shortcut.clone();
+    tauri::async_runtime::spawn(async move {
+        let selected = capture_selection_text_stable().await;
+        match selected {
+            Ok(text) => {
+                let seed_text = text.trim().to_owned();
+                if seed_text.is_empty() {
+                    emit_hotkey_trace(
+                        &app_for_seed,
+                        "quick-convert-seed-skip",
+                        &shortcut_for_seed,
+                        "reason=empty-selection".to_owned(),
+                    );
+                    return;
+                }
+
+                emit_hotkey_trace(
+                    &app_for_seed,
+                    "quick-convert-seed-ready",
+                    &shortcut_for_seed,
+                    format!("seedLen={}", seed_text.chars().count()),
+                );
+
+                let _ = app_for_seed.emit_to(
+                    "quick-convert",
+                    "quick-convert-seed-updated",
+                    serde_json::json!({
+                        "text": seed_text,
+                        "shortcut": shortcut_for_seed,
+                    }),
+                );
+            }
+            Err(err) => {
+                emit_hotkey_trace(
+                    &app_for_seed,
+                    "quick-convert-seed-failed",
+                    &shortcut_for_seed,
+                    err,
+                );
+            }
+        }
+    });
+
+    Ok(())
 }
 
 async fn on_translate_replace_triggered(

@@ -46,10 +46,32 @@ interface HotkeyTracePayload {
   detail?: string
 }
 
+interface SidecarReadinessPayload {
+  stage?: string
+  ready?: boolean
+  attempts?: number
+  elapsed_ms?: number
+  detail?: string
+}
+
+interface SidecarWarmupStatusPayload {
+  stage?: string
+  source?: string
+  target?: string
+  ready?: boolean
+  attempts?: number
+  detail?: string
+}
+
 interface QuickConvertOpenedPayload {
   text: string
   shortcut: string
   position_mode?: string
+}
+
+interface QuickConvertSeedUpdatedPayload {
+  text: string
+  shortcut?: string
 }
 
 type QuickConvertPopupPositionMode = AppSettings['quick_convert_popup_position']
@@ -970,6 +992,8 @@ function PopoverWindow() {
     let cleanupDebugCopy: (() => void) | null = null
     let cleanupDebugClear: (() => void) | null = null
     let cleanupHotkeyTrace: (() => void) | null = null
+    let cleanupSidecarReadiness: (() => void) | null = null
+    let cleanupSidecarWarmup: (() => void) | null = null
 
     const setupDebugHotkeys = async () => {
       try {
@@ -1011,6 +1035,61 @@ function PopoverWindow() {
       } catch {
         cleanupHotkeyTrace = null
       }
+
+      try {
+        const unlistenSidecarReadiness = await listen<SidecarReadinessPayload>('sidecar-readiness', (event) => {
+          const stage = typeof event.payload?.stage === 'string' && event.payload.stage.trim()
+            ? event.payload.stage.trim()
+            : 'unknown-stage'
+          const ready = event.payload?.ready ? '1' : '0'
+          const attempts = Number.isFinite(event.payload?.attempts)
+            ? Number(event.payload?.attempts)
+            : 0
+          const elapsed = Number.isFinite(event.payload?.elapsed_ms)
+            ? Number(event.payload?.elapsed_ms)
+            : 0
+          const detail = typeof event.payload?.detail === 'string' && event.payload.detail.trim()
+            ? event.payload.detail.trim()
+            : ''
+          appendDebugLog(
+            'trace',
+            'Sidecar readiness',
+            `stage=${stage} ready=${ready} attempts=${attempts} elapsedMs=${elapsed}${detail ? ` | ${detail}` : ''}`,
+          )
+        })
+        cleanupSidecarReadiness = unlistenSidecarReadiness
+      } catch {
+        cleanupSidecarReadiness = null
+      }
+
+      try {
+        const unlistenSidecarWarmup = await listen<SidecarWarmupStatusPayload>('sidecar-warmup-status', (event) => {
+          const stage = typeof event.payload?.stage === 'string' && event.payload.stage.trim()
+            ? event.payload.stage.trim()
+            : 'unknown-stage'
+          const source = typeof event.payload?.source === 'string' && event.payload.source.trim()
+            ? event.payload.source.trim()
+            : 'unknown'
+          const target = typeof event.payload?.target === 'string' && event.payload.target.trim()
+            ? event.payload.target.trim()
+            : 'unknown'
+          const ready = event.payload?.ready ? '1' : '0'
+          const attempts = Number.isFinite(event.payload?.attempts)
+            ? Number(event.payload?.attempts)
+            : 0
+          const detail = typeof event.payload?.detail === 'string' && event.payload.detail.trim()
+            ? event.payload.detail.trim()
+            : ''
+          appendDebugLog(
+            'trace',
+            'Sidecar warmup status',
+            `stage=${stage} pair=${source}->${target} ready=${ready} attempts=${attempts}${detail ? ` | ${detail}` : ''}`,
+          )
+        })
+        cleanupSidecarWarmup = unlistenSidecarWarmup
+      } catch {
+        cleanupSidecarWarmup = null
+      }
     }
     if (DEBUG_TRACE_ENABLED) {
       void setupDebugHotkeys()
@@ -1051,6 +1130,8 @@ function PopoverWindow() {
       cleanupDebugCopy?.()
       cleanupDebugClear?.()
       cleanupHotkeyTrace?.()
+      cleanupSidecarReadiness?.()
+      cleanupSidecarWarmup?.()
     }
   }, [clearTraceLogs, closePopover, exportTraceLogs, hasTauriBridge])
 
@@ -1179,6 +1260,8 @@ function QuickConvertWindow() {
       DEFAULT_SETTINGS.quick_convert_popup_position,
     )
   const settingsRef = useRef<AppSettings>(DEFAULT_SETTINGS)
+  const inputValueRef = useRef('')
+  const allowAsyncSeedReplaceRef = useRef(false)
   const saveSequenceRef = useRef(0)
   const lastHotkeyEventRef = useRef({ copyAt: 0, clearAt: 0 })
   const copy = getSettingsCopy(settings.target_language)
@@ -1220,6 +1303,10 @@ function QuickConvertWindow() {
   useEffect(() => {
     settingsRef.current = settings
   }, [settings])
+
+  useEffect(() => {
+    inputValueRef.current = inputValue
+  }, [inputValue])
 
   useEffect(() => {
     const nextPosition = normalizeQuickConvertPopupPosition(
@@ -1279,6 +1366,7 @@ function QuickConvertWindow() {
   }, [])
 
   const closeQuickConvert = useCallback((reason: string) => {
+    allowAsyncSeedReplaceRef.current = false
     appendDebugLog('quick-convert', 'Close quick convert', reason)
     void invoke('hide_quick_convert_window').catch(() => undefined)
   }, [])
@@ -1342,6 +1430,7 @@ function QuickConvertWindow() {
   useEffect(() => {
     let cleanupSettingsUpdated: (() => void) | null = null
     let cleanupQuickConvertOpened: (() => void) | null = null
+    let cleanupQuickConvertSeedUpdated: (() => void) | null = null
 
     const setup = async () => {
       try {
@@ -1361,6 +1450,7 @@ function QuickConvertWindow() {
             event.payload.position_mode,
             settingsRef.current.quick_convert_popup_position,
           )
+          allowAsyncSeedReplaceRef.current = !hasSeed
           setPopupPositionMode(resolvedPosition)
           if (seedText.trim().length > 0) {
             setInputValue(seedText)
@@ -1389,12 +1479,51 @@ function QuickConvertWindow() {
         )
         cleanupQuickConvertOpened = null
       }
+
+      try {
+        const unlistenQuickConvertSeedUpdated = await listen<QuickConvertSeedUpdatedPayload>('quick-convert-seed-updated', (event) => {
+          const seedText = (event.payload.text ?? '').trim()
+          if (!seedText) {
+            return
+          }
+
+          if (!allowAsyncSeedReplaceRef.current) {
+            appendDebugLog(
+              'quick-convert',
+              'Quick convert async seed ignored',
+              `shortcut=${event.payload.shortcut || 'unknown'} reason=user-input inputLen=${inputValueRef.current.trim().length}`,
+            )
+            return
+          }
+
+          allowAsyncSeedReplaceRef.current = false
+          setInputValue(seedText)
+          setOutputValue('')
+          setResult(null)
+          setFocusToken((current) => current + 1)
+          appendDebugLog(
+            'quick-convert',
+            'Quick convert async seed applied',
+            `shortcut=${event.payload.shortcut || 'unknown'} seedLen=${seedText.length}`,
+          )
+        })
+
+        cleanupQuickConvertSeedUpdated = unlistenQuickConvertSeedUpdated
+      } catch (error) {
+        appendDebugLog(
+          'quick-convert',
+          'Quick convert async seed listener failed',
+          error instanceof Error ? error.message : String(error),
+        )
+        cleanupQuickConvertSeedUpdated = null
+      }
     }
 
     void setup()
     return () => {
       cleanupSettingsUpdated?.()
       cleanupQuickConvertOpened?.()
+      cleanupQuickConvertSeedUpdated?.()
     }
   }, [])
 
@@ -1604,6 +1733,7 @@ function QuickConvertWindow() {
         onSourceLanguageChange={(value: AppSettings['quick_translate_source_language']) => setQuickLanguages(value, settingsRef.current.quick_translate_target_language)}
         onTargetLanguageChange={(value: AppSettings['quick_translate_target_language']) => setQuickLanguages(settingsRef.current.quick_translate_source_language, value)}
         onInputValueChange={(value: string) => {
+          allowAsyncSeedReplaceRef.current = false
           setInputValue(value)
           setOutputValue('')
           setResult(null)

@@ -29,6 +29,9 @@ export interface QuickConvertRequest {
 export async function quickConvertText(
   request: QuickConvertRequest,
 ): Promise<QuickConvertResult> {
+  const hasBridge =
+    typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
   try {
     return await invokeWithFallback<QuickConvertResult>(
       "quick_convert_text",
@@ -44,10 +47,10 @@ export async function quickConvertText(
       textLength: request.text.length,
       endpoint: "http://127.0.0.1:49152/quick-convert",
       fetchError: fetchMessage,
-      phase: "direct-fetch-no-bridge",
+      phase: hasBridge ? "invoke-or-sidecar-failed" : "sidecar-fetch-no-bridge",
     });
     throw new Error(
-      `quick-convert:direct-fetch-no-bridge:fetch=${fetchMessage}`,
+      `quick-convert:${hasBridge ? "invoke-or-sidecar-failed" : "sidecar-fetch-no-bridge"}:fetch=${fetchMessage}`,
     );
   }
 }

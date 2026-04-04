@@ -22,6 +22,7 @@ pub fn apply_default_sidecar_endpoints() {
     let host = std::env::var("SIDECAR_HOST").unwrap_or_else(|_| SIDECAR_HOST.to_owned());
     let port = std::env::var("SIDECAR_PORT").unwrap_or_else(|_| SIDECAR_PORT.to_owned());
     let base = format!("http://{host}:{port}");
+    set_if_missing("SIDECAR_HEALTH_URL", &format!("{base}/health"));
     set_if_missing("SIDECAR_URL", &format!("{base}/translate"));
     set_if_missing("SIDECAR_QUICK_CONVERT_URL", &format!("{base}/quick-convert"));
     set_if_missing("SIDECAR_LOOKUP_URL", &format!("{base}/lookup"));

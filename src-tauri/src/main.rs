@@ -66,7 +66,13 @@ fn main() {
             let warmup_client = state.client.clone();
             app.manage(state);
             app.manage(bridge::UpdateState::default());
-            bridge::schedule_language_warmup(warmup_client, loaded.clone());
+            let _ = bridge::wait_for_sidecar_health(&app_handle, "startup");
+            bridge::schedule_language_warmup(
+                app_handle.clone(),
+                warmup_client,
+                loaded.clone(),
+                "startup",
+            );
             hotkey::register_hotkeys(&app_handle, &loaded)?;
             selection::install_popover_window_guards(&app_handle);
             selection::start_selection_listener(app_handle.clone());
@@ -85,14 +91,12 @@ fn main() {
                 .icon(app_handle.default_window_icon().unwrap().clone())
                 .menu(&menu)
                 .show_menu_on_left_click(false)
-                .on_menu_event(|app, event| {
-                    match event.id.as_ref() {
-                        "quit" => app.exit(0),
-                        "settings" => {
-                            let _ = bridge::show_settings_window(app.clone());
-                        }
-                        _ => {}
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "quit" => app.exit(0),
+                    "settings" => {
+                        let _ = bridge::show_settings_window(app.clone());
                     }
+                    _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
                     if let TrayIconEvent::Click {
