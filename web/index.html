@@ -99,63 +99,77 @@
             transform: translateX(12px);
         }
 
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 100;
-            inset: 0;
-            background: rgba(0, 0, 0, 0.8);
-            backdrop-filter: blur(12px);
-        }
-
         .gif-container {
             cursor: pointer;
             transition: all 0.3s ease;
             height: 100%;
+            position: relative;
+            background: #0b0b0b;
         }
 
         .preview-video {
             width: 100%;
             height: 100%;
-            object-fit: cover;
-            display: block;
+            object-fit: contain;
+            object-position: center;
+            padding: 8px;
+            box-sizing: border-box;
+            display: none;
             background: #0b0b0b;
             border: none;
         }
 
-        .video-overlay {
+        .frame-thumbnail {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            object-position: center;
+            padding: 8px;
+            box-sizing: border-box;
+            display: block;
+            background: #0b0b0b;
+        }
+
+        .play-overlay {
             position: absolute;
             inset: 0;
             display: flex;
             align-items: center;
             justify-content: center;
             pointer-events: none;
-            transition: opacity 0.2s ease;
+            transition: opacity 0.2s ease, transform 0.2s ease;
         }
 
-        .video-overlay-icon {
-            width: 52px;
-            height: 52px;
+        .play-overlay-icon {
+            width: 54px;
+            height: 54px;
             border-radius: 9999px;
-            border: none;
-            background: rgba(0, 0, 0, 0.62);
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            background: rgba(0, 0, 0, 0.5);
             color: #fff;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            font-size: 22px;
-            font-weight: 700;
-            line-height: 1;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
         }
 
-        .video-overlay-icon svg {
+        .play-overlay-icon svg {
             width: 22px;
             height: 22px;
             margin-left: 2px;
         }
 
-        .gif-container.is-playing .video-overlay {
+        .gif-container.is-playing .preview-video {
+            display: block;
+        }
+
+        .gif-container.is-playing .frame-thumbnail {
+            display: none;
+        }
+
+        .gif-container.is-playing .play-overlay {
             opacity: 0;
+            transform: scale(0.96);
         }
 
         .home-main {
@@ -171,13 +185,6 @@
         .home-settings {
             min-height: 0;
             overflow: hidden;
-        }
-
-        /* Fix lỗi hiển thị 1 khung: dùng height 100% thay vì 100vh */
-        .gif-container img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
         }
 
         @media (max-width: 1024px) {
@@ -353,27 +360,24 @@
 
         <!-- Cột trái: 3 Khung GIF Full (Fixed Bug) -->
         <div class="home-media col-span-4 flex flex-col compact-gap h-full">
-            <div class="flex-1 bg-[#1a1a1a] rounded-xl overflow-hidden relative group card-shadow gif-container" data-video-frame>
-                <video class="preview-video" preload="metadata" playsinline muted>
-                    <source src="https://www.w3schools.com/html/mov_bbb.webm" type="video/webm">
-                </video>
-                <div class="video-overlay"><span class="video-overlay-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor">
+            <div class="flex-1 bg-[#1a1a1a] rounded-xl overflow-hidden relative group card-shadow gif-container" data-video-frame data-video-src="./assets/video1.webm" role="button" tabindex="0" aria-label="Phát video minh họa 1">
+                <img class="frame-thumbnail" src="./assets/t1.webp" alt="Thumbnail video minh họa 1" fetchpriority="high" decoding="async">
+                <video class="preview-video" preload="none" playsinline muted></video>
+                <div class="play-overlay" aria-hidden="true"><span class="play-overlay-icon"><svg viewBox="0 0 24 24" fill="currentColor">
                             <path d="M8 6v12l10-6z"></path>
                         </svg></span></div>
             </div>
-            <div class="flex-1 bg-[#1a1a1a] rounded-xl overflow-hidden relative group card-shadow gif-container" data-video-frame>
-                <video class="preview-video" preload="metadata" playsinline muted>
-                    <source src="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.webm" type="video/webm">
-                </video>
-                <div class="video-overlay"><span class="video-overlay-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor">
+            <div class="flex-1 bg-[#1a1a1a] rounded-xl overflow-hidden relative group card-shadow gif-container" data-video-frame data-video-src="./assets/video2.webm" role="button" tabindex="0" aria-label="Phát video minh họa 2">
+                <img class="frame-thumbnail" src="./assets/t2.webp" alt="Thumbnail video minh họa 2" loading="lazy" decoding="async">
+                <video class="preview-video" preload="none" playsinline muted></video>
+                <div class="play-overlay" aria-hidden="true"><span class="play-overlay-icon"><svg viewBox="0 0 24 24" fill="currentColor">
                             <path d="M8 6v12l10-6z"></path>
                         </svg></span></div>
             </div>
-            <div class="flex-1 bg-[#1a1a1a] rounded-xl overflow-hidden relative group card-shadow gif-container" data-video-frame>
-                <video class="preview-video" preload="metadata" playsinline muted>
-                    <source src="https://media.w3.org/2010/05/sintel/trailer_hd.webm" type="video/webm">
-                </video>
-                <div class="video-overlay"><span class="video-overlay-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor">
+            <div class="flex-1 bg-[#1a1a1a] rounded-xl overflow-hidden relative group card-shadow gif-container" data-video-frame data-video-src="./assets/video3.webm" role="button" tabindex="0" aria-label="Phát video minh họa 3">
+                <img class="frame-thumbnail" src="./assets/t3.webp" alt="Thumbnail video minh họa 3" loading="lazy" decoding="async">
+                <video class="preview-video" preload="none" playsinline muted></video>
+                <div class="play-overlay" aria-hidden="true"><span class="play-overlay-icon"><svg viewBox="0 0 24 24" fill="currentColor">
                             <path d="M8 6v12l10-6z"></path>
                         </svg></span></div>
             </div>
@@ -590,6 +594,24 @@
 
         const videoFrames = Array.from(document.querySelectorAll('[data-video-frame]'));
 
+        function ensureVideoSource(frame, video) {
+            if (video.dataset.loaded === '1') {
+                return;
+            }
+
+            const src = frame.getAttribute('data-video-src');
+            if (!src) {
+                return;
+            }
+
+            const source = document.createElement('source');
+            source.src = src;
+            source.type = 'video/webm';
+            video.appendChild(source);
+            video.dataset.loaded = '1';
+            video.load();
+        }
+
         function stopFrame(frame) {
             const video = frame.querySelector('video');
             if (!video) {
@@ -597,12 +619,39 @@
             }
 
             video.pause();
-            try {
+            if (!Number.isNaN(video.duration)) {
                 video.currentTime = 0;
-            } catch {
-                video.load();
             }
             frame.classList.remove('is-playing');
+        }
+
+        function playFrame(frame) {
+            const video = frame.querySelector('video');
+            if (!video) {
+                return;
+            }
+
+            if (frame.classList.contains('is-playing')) {
+                stopFrame(frame);
+                return;
+            }
+
+            videoFrames.forEach((other) => {
+                if (other !== frame) {
+                    stopFrame(other);
+                }
+            });
+
+            ensureVideoSource(frame, video);
+            frame.classList.add('is-playing');
+
+            const playResult = video.play();
+            if (playResult && typeof playResult.then === 'function') {
+                void playResult.catch(() => {
+                    frame.classList.remove('is-playing');
+                    stopFrame(frame);
+                });
+            }
         }
 
         videoFrames.forEach((frame) => {
@@ -614,25 +663,13 @@
             video.controls = false;
 
             frame.addEventListener('click', () => {
-                if (frame.classList.contains('is-playing')) {
-                    stopFrame(frame);
-                    return;
-                }
+                playFrame(frame);
+            });
 
-                videoFrames.forEach((other) => {
-                    if (other !== frame) {
-                        stopFrame(other);
-                    }
-                });
-
-                frame.classList.add('is-playing');
-
-                const playResult = video.play();
-                if (playResult && typeof playResult.then === 'function') {
-                    void playResult.catch(() => {
-                        frame.classList.remove('is-playing');
-                        stopFrame(frame);
-                    });
+            frame.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    playFrame(frame);
                 }
             });
 
