@@ -284,6 +284,11 @@ export function QuickConvertPopup({
     : isBottomPosition
       ? " is-bottom-anchor"
       : " is-middle-anchor";
+  const horizontalAnchorClass = positionMode.endsWith("-left")
+    ? " is-horizontal-left"
+    : positionMode.endsWith("-right")
+      ? " is-horizontal-right"
+      : " is-horizontal-center";
 
   const languageRow = (
     <div
@@ -456,7 +461,7 @@ export function QuickConvertPopup({
 
       <section
         ref={popupRef}
-        className={`apl-quick-convert-popup apl-quick-convert-popup--minimal${verticalAnchorClass}${positionLayoutClass}${isBottomPosition ? " is-bottom-layout" : ""}${loading ? " is-loading" : ""}`}
+        className={`apl-quick-convert-popup apl-quick-convert-popup--minimal${verticalAnchorClass}${horizontalAnchorClass}${positionLayoutClass}${isBottomPosition ? " is-bottom-layout" : ""}${loading ? " is-loading" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={copy.quickConvertPopupTitle}

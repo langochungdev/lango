@@ -112,11 +112,11 @@ impl Default for AppConfig {
             popover_open_panel_mode: "none".to_owned(),
             popover_definition_language_mode: "output".to_owned(),
             hotkey_translate_shortcut: "Shift".to_owned(),
-            enable_hotkey_translate: true,
-            hotkey_translate_ctrl_enter_send: false,
+            enable_hotkey_translate: false,
+            hotkey_translate_ctrl_enter_send: true,
             quick_convert_hotkey: "Ctrl+Space".to_owned(),
             enable_quick_convert_hotkey: true,
-            quick_convert_popup_position: "middle-center".to_owned(),
+            quick_convert_popup_position: "top-right".to_owned(),
             ocr_paragraph_display_mode: "popover".to_owned(),
         }
     }
@@ -193,7 +193,7 @@ impl AppConfig {
                 | "bottom-center"
                 | "bottom-right"
         ) {
-            next.quick_convert_popup_position = "middle-center".to_owned();
+            next.quick_convert_popup_position = "top-right".to_owned();
         }
         if !matches!(
             next.ocr_paragraph_display_mode.as_str(),

@@ -136,11 +136,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   popover_open_panel_mode: "none",
   popover_definition_language_mode: "output",
   hotkey_translate_shortcut: "Shift",
-  enable_hotkey_translate: true,
-  hotkey_translate_ctrl_enter_send: false,
+  enable_hotkey_translate: false,
+  hotkey_translate_ctrl_enter_send: true,
   quick_convert_hotkey: "Ctrl+Space",
   enable_quick_convert_hotkey: true,
-  quick_convert_popup_position: "middle-center",
+  quick_convert_popup_position: "top-right",
   ocr_paragraph_display_mode: "popover",
 };
 

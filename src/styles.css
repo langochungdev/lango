@@ -417,6 +417,12 @@ button {
     overflow: hidden;
 }
 
+.apl-quick-convert-popup--minimal.is-horizontal-left,
+.apl-quick-convert-popup--minimal.is-horizontal-right {
+    width: min(520px, 100vw);
+    max-width: 100vw;
+}
+
 .apl-quick-convert-popup--minimal.is-top-anchor,
 .apl-quick-convert-popup--minimal.is-bottom-anchor {
     max-height: 100vh;
@@ -431,6 +437,12 @@ button {
 .apl-quick-convert-popup.is-bottom-anchor {
     top: auto;
     bottom: 0;
+    transform: translateX(-50%);
+}
+
+.apl-quick-convert-popup.is-middle-anchor {
+    top: 0;
+    bottom: auto;
     transform: translateX(-50%);
 }
 

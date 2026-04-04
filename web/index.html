@@ -19,6 +19,12 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+        }
+
         body {
             font-family: 'Inter', sans-serif;
             /* Background Checkerboard CSS thuần - Chuẩn mẫu tối */
@@ -32,7 +38,7 @@
             background-position: 0 0, 0 16px, 16px -16px, -16px 0px;
             color: #37352F;
             overflow: hidden;
-            height: 100vh;
+            height: 100dvh;
         }
 
         .notion-sidebar-bg {
@@ -103,20 +109,68 @@
         }
 
         .gif-container {
-            cursor: zoom-in;
+            cursor: pointer;
             transition: all 0.3s ease;
             height: 100%;
         }
 
+        .preview-video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+            background: #0b0b0b;
+            border: none;
+        }
+
+        .video-overlay {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+            transition: opacity 0.2s ease;
+        }
+
+        .video-overlay-icon {
+            width: 52px;
+            height: 52px;
+            border-radius: 9999px;
+            border: none;
+            background: rgba(0, 0, 0, 0.62);
+            color: #fff;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            font-weight: 700;
+            line-height: 1;
+        }
+
+        .video-overlay-icon svg {
+            width: 22px;
+            height: 22px;
+            margin-left: 2px;
+        }
+
+        .gif-container.is-playing .video-overlay {
+            opacity: 0;
+        }
+
         .home-main {
+            min-height: 0;
+            overflow: hidden;
+            padding-bottom: 0;
+        }
+
+        .home-main>* {
             min-height: 0;
         }
 
-        @media (hover: hover) {
-            .gif-container:hover {
-                transform: translateY(-2px);
-                filter: brightness(1.1);
-            }
+        .home-settings {
+            min-height: 0;
+            overflow: hidden;
         }
 
         /* Fix lỗi hiển thị 1 khung: dùng height 100% thay vì 100vh */
@@ -142,17 +196,28 @@
             }
 
             .home-nav {
+                display: grid;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
                 width: 100%;
-                justify-content: flex-start;
                 gap: 0.75rem;
-                flex-wrap: wrap;
+                align-items: stretch;
             }
 
             .home-nav>a {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                width: 100%;
+                min-width: 0;
                 padding: 0.45rem 0.7rem;
                 border: 1px solid rgba(255, 255, 255, 0.2);
                 border-radius: 0.55rem;
                 background: rgba(255, 255, 255, 0.04);
+            }
+
+            .home-nav> :not([hidden])~ :not([hidden]) {
+                margin-left: 0 !important;
+                margin-right: 0 !important;
             }
 
             .home-nav .home-divider {
@@ -213,14 +278,10 @@
             }
 
             .home-nav {
-                display: grid;
-                grid-template-columns: repeat(3, minmax(0, 1fr));
-                width: 100%;
                 gap: 0.45rem;
             }
 
             .home-nav>a {
-                justify-content: center;
                 padding: 0.45rem 0.35rem;
                 font-size: 0.72rem;
                 line-height: 1.1;
@@ -288,21 +349,27 @@
     </header>
 
     <!-- Layout chính -->
-    <main class="home-main flex-1 grid grid-cols-12 compact-gap overflow-auto pb-4">
+    <main class="home-main flex-1 grid grid-cols-12 compact-gap">
 
         <!-- Cột trái: 3 Khung GIF Full (Fixed Bug) -->
         <div class="home-media col-span-4 flex flex-col compact-gap h-full">
-            <div class="flex-1 bg-[#1a1a1a] notion-border rounded-xl overflow-hidden relative group card-shadow gif-container" onclick="openFullscreen('https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExNHJndnZ6Zmt6Zmt6Zmt6Zmt6Zmt6Zmt6Zmt6Zmt6Zmt6Zmt6Zmt6JmVwPXYxX2ludGVybmFsX2dpZl9ieV9pZCZjdD1n/3o7TKMGpxU35pY3C48/giphy.gif', 'Instant Translation')">
-                <div class="absolute top-3 left-3 z-10 bg-black/60 backdrop-blur-md px-2 py-1 rounded text-[10px] font-bold text-white border border-white/10">Instant Translation</div>
-                <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExNHJndnZ6Zmt6Zmt6Zmt6Zmt6Zmt6Zmt6Zmt6Zmt6Zmt6Zmt6Zmt6JmVwPXYxX2ludGVybmFsX2dpZl9ieV9pZCZjdD1n/3o7TKMGpxU35pY3C48/giphy.gif" alt="GIF 1">
+            <div class="flex-1 bg-[#1a1a1a] rounded-xl overflow-hidden relative group card-shadow gif-container" data-video-frame>
+                <video class="preview-video" preload="metadata" playsinline muted>
+                    <source src="https://www.w3schools.com/html/mov_bbb.webm" type="video/webm">
+                </video>
+                <div class="video-overlay"><span class="video-overlay-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 6v12l10-6z"></path></svg></span></div>
             </div>
-            <div class="flex-1 bg-[#1a1a1a] notion-border rounded-xl overflow-hidden relative group card-shadow gif-container" onclick="openFullscreen('https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3N2M3N2M3N2M3N2M3N2M3N2M3N2M3N2M3N2M3N2M3JmVwPXYxX2ludGVybmFsX2dpZl9ieV9pZCZjdD1n/L8K62iTDpYV7G/giphy.gif', 'AI Analysis')">
-                <div class="absolute top-3 left-3 z-10 bg-black/60 backdrop-blur-md px-2 py-1 rounded text-[10px] font-bold text-white border border-white/10">AI Analysis</div>
-                <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3N2M3N2M3N2M3N2M3N2M3N2M3N2M3N2M3N2M3N2M3JmVwPXYxX2ludGVybmFsX2dpZl9ieV9pZCZjdD1n/L8K62iTDpYV7G/giphy.gif" alt="GIF 2">
+            <div class="flex-1 bg-[#1a1a1a] rounded-xl overflow-hidden relative group card-shadow gif-container" data-video-frame>
+                <video class="preview-video" preload="metadata" playsinline muted>
+                    <source src="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.webm" type="video/webm">
+                </video>
+                <div class="video-overlay"><span class="video-overlay-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 6v12l10-6z"></path></svg></span></div>
             </div>
-            <div class="flex-1 bg-[#1a1a1a] notion-border rounded-xl overflow-hidden relative group card-shadow gif-container" onclick="openFullscreen('https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExNHJndnZ6Zmt6Zmt6Zmt6Zmt6Zmt6Zmt6Zmt6Zmt6Zmt6Zmt6Zmt6JmVwPXYxX2ludGVybmFsX2dpZl9ieV9pZCZjdD1n/3o7TKMGpxU35pY3C48/giphy.gif', 'Workflow Sync')">
-                <div class="absolute top-3 left-3 z-10 bg-black/60 backdrop-blur-md px-2 py-1 rounded text-[10px] font-bold text-white border border-white/10">Workflow Sync</div>
-                <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExNHJndnZ6Zmt6Zmt6Zmt6Zmt6Zmt6Zmt6Zmt6Zmt6Zmt6Zmt6Zmt6JmVwPXYxX2ludGVybmFsX2dpZl9ieV9pZCZjdD1n/3o7TKMGpxU35pY3C48/giphy.gif" alt="GIF 3">
+            <div class="flex-1 bg-[#1a1a1a] rounded-xl overflow-hidden relative group card-shadow gif-container" data-video-frame>
+                <video class="preview-video" preload="metadata" playsinline muted>
+                    <source src="https://media.w3.org/2010/05/sintel/trailer_hd.webm" type="video/webm">
+                </video>
+                <div class="video-overlay"><span class="video-overlay-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 6v12l10-6z"></path></svg></span></div>
             </div>
         </div>
 
@@ -472,21 +539,6 @@
         </div>
     </main>
 
-    <!-- Fullscreen Modal -->
-    <div id="videoModal" class="modal flex items-center justify-center p-6">
-        <div class="bg-white w-full max-w-4xl rounded-2xl shadow-2xl notion-border overflow-hidden">
-            <div class="px-5 py-3 bg-zinc-50 border-b border-zinc-100 flex justify-between items-center">
-                <span id="videoTitle" class="text-[11px] font-bold text-zinc-500 uppercase tracking-widest text-black">Preview Content</span>
-                <button onclick="closeModal()" class="text-zinc-400 hover:text-black transition-colors">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-                        <path d="M6 18L18 6M6 6l12 12"></path>
-                    </svg>
-                </button>
-            </div>
-            <div id="modalBody" class="aspect-video bg-[#050505] flex items-center justify-center"></div>
-        </div>
-    </div>
-
     <script>
         const RELEASES_API = 'https://api.github.com/repos/langochungdev/dictover-desktop/releases?per_page=6';
         const RELEASE_BASE = 'https://github.com/langochungdev/dictover-desktop/releases';
@@ -566,35 +618,58 @@
 
         void resolveLatestDownloadLink();
 
-        const modal = document.getElementById('videoModal');
-        const title = document.getElementById('videoTitle');
-        const body = document.getElementById('modalBody');
+        const videoFrames = Array.from(document.querySelectorAll('[data-video-frame]'));
 
-        function openModal(name) {
-            title.innerText = `Hướng dẫn: ${name}`;
-            body.innerHTML = `
-                <div class="flex flex-col items-center">
-                    <div class="w-12 h-12 rounded-full bg-emerald-500/20 flex items-center justify-center mb-3">
-                        <svg class="w-6 h-6 text-emerald-500 ml-1" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"></path></svg>
-                    </div>
-                    <p class="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Video Tutorial Placeholder</p>
-                </div>
-            `;
-            modal.style.display = 'flex';
+        function stopFrame(frame) {
+            const video = frame.querySelector('video');
+            if (!video) {
+                return;
+            }
+
+            video.pause();
+            try {
+                video.currentTime = 0;
+            } catch {
+                video.load();
+            }
+            frame.classList.remove('is-playing');
         }
 
-        function openFullscreen(src, name) {
-            title.innerText = `Phóng to: ${name}`;
-            body.innerHTML = `<img src="${src}" class="w-full h-full object-contain">`;
-            modal.style.display = 'flex';
-        }
+        videoFrames.forEach((frame) => {
+            const video = frame.querySelector('video');
+            if (!video) {
+                return;
+            }
 
-        function closeModal() {
-            modal.style.display = 'none';
-            body.innerHTML = '';
-        }
+            video.controls = false;
 
-        window.onclick = function (e) { if (e.target == modal) closeModal(); }
+            frame.addEventListener('click', () => {
+                if (frame.classList.contains('is-playing')) {
+                    stopFrame(frame);
+                    return;
+                }
+
+                videoFrames.forEach((other) => {
+                    if (other !== frame) {
+                        stopFrame(other);
+                    }
+                });
+
+                frame.classList.add('is-playing');
+
+                const playResult = video.play();
+                if (playResult && typeof playResult.then === 'function') {
+                    void playResult.catch(() => {
+                        frame.classList.remove('is-playing');
+                        stopFrame(frame);
+                    });
+                }
+            });
+
+            video.addEventListener('ended', () => {
+                stopFrame(frame);
+            });
+        });
     </script>
 </body>
 
