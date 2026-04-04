@@ -1494,6 +1494,35 @@ pub fn show_settings_window(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn toggle_settings_window(app: AppHandle) -> Result<(), String> {
+    let main = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window not found".to_owned())?;
+
+    let visible = main
+        .is_visible()
+        .map_err(|err| format!("read settings visibility failed: {err}"))?;
+
+    if visible {
+        main.hide()
+            .map_err(|err| format!("hide settings window failed: {err}"))?;
+
+        return Ok(());
+    }
+
+    let _ = main.set_always_on_top(true);
+    let _ = main.center();
+    main.show()
+        .map_err(|err| format!("show settings window failed: {err}"))?;
+    let _ = main.set_always_on_top(false);
+
+    main.set_focus()
+        .map_err(|err| format!("focus settings window failed: {err}"))?;
+
+    Ok(())
+}
+
+#[tauri::command]
 pub fn hide_settings_window(app: AppHandle) -> Result<(), String> {
     let main = app
         .get_webview_window("main")

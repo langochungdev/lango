@@ -11,10 +11,33 @@ mod selection;
 mod sidecar_runtime;
 
 use reqwest::Client;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use tauri::menu::{Menu, MenuItem};
-use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Manager, RunEvent};
 use tauri_plugin_global_shortcut::{Builder as GlobalShortcutBuilder, ShortcutState};
+
+const TRAY_TOGGLE_DEBOUNCE_MS: u64 = 220;
+static LAST_TRAY_TOGGLE_AT: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+
+fn allow_tray_toggle_now() -> bool {
+    let gate = LAST_TRAY_TOGGLE_AT.get_or_init(|| Mutex::new(None));
+    let now = Instant::now();
+
+    let Ok(mut last_guard) = gate.lock() else {
+        return true;
+    };
+
+    if let Some(last) = *last_guard {
+        if now.duration_since(last) < Duration::from_millis(TRAY_TOGGLE_DEBOUNCE_MS) {
+            return false;
+        }
+    }
+
+    *last_guard = Some(now);
+    true
+}
 
 fn main() {
     let app = tauri::Builder::default()
@@ -61,20 +84,28 @@ fn main() {
             let _tray = TrayIconBuilder::new()
                 .icon(app_handle.default_window_icon().unwrap().clone())
                 .menu(&menu)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "quit" => app.exit(0),
-                    "settings" => {
-                        let _ = bridge::show_settings_window(app.clone());
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| {
+                    match event.id.as_ref() {
+                        "quit" => app.exit(0),
+                        "settings" => {
+                            let _ = bridge::show_settings_window(app.clone());
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
                     if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
+                        button,
+                        button_state,
                         ..
                     } = event
                     {
-                        let _ = bridge::show_settings_window(tray.app_handle().clone());
+                        if button == MouseButton::Left && button_state == MouseButtonState::Up {
+                            if allow_tray_toggle_now() {
+                                let _ = bridge::toggle_settings_window(tray.app_handle().clone());
+                            }
+                        }
                     }
                 })
                 .build(&app_handle)?;
@@ -103,6 +134,7 @@ fn main() {
             bridge::submit_ocr_selection,
             bridge::take_pending_selection,
             bridge::show_settings_window,
+            bridge::toggle_settings_window,
             bridge::hide_settings_window,
             bridge::show_debug_window,
             bridge::open_external_url,

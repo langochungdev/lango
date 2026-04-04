@@ -467,16 +467,10 @@ function SettingsWindow() {
       closeSettingsWindow()
     }
 
-    const onWindowBlur = () => {
-      closeSettingsWindow()
-    }
-
     window.addEventListener('pointerdown', onPointerDown)
-    window.addEventListener('blur', onWindowBlur)
 
     return () => {
       window.removeEventListener('pointerdown', onPointerDown)
-      window.removeEventListener('blur', onWindowBlur)
     }
   }, [closeSettingsWindow, hasTauriBridge])
 
