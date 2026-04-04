@@ -9,11 +9,11 @@ import uvicorn
 try:
     from .image import search_images
     from .ocr import run_ocr, run_ocr_overlay
-    from .translation import lookup_dictionary, translate
+    from .translation import lookup_dictionary, quick_convert, translate
 except ImportError:
     from image import search_images
     from ocr import run_ocr, run_ocr_overlay
-    from translation import lookup_dictionary, translate
+    from translation import lookup_dictionary, quick_convert, translate
 
 
 SUPPORTED_SOURCE_LANGS = {
@@ -60,6 +60,26 @@ class LookupRequest(BaseModel):
     def validate_source_lang(cls, value: str) -> str:
         if value not in SUPPORTED_SOURCE_LANGS:
             raise ValueError("unsupported source language")
+        return value
+
+
+class QuickConvertRequest(BaseModel):
+    text: str = Field(min_length=0)
+    source: str = Field(default="auto")
+    target: str = Field(default="en")
+
+    @field_validator("source")
+    @classmethod
+    def validate_source(cls, value: str) -> str:
+        if value not in SUPPORTED_SOURCE_LANGS:
+            raise ValueError("unsupported source language")
+        return value
+
+    @field_validator("target")
+    @classmethod
+    def validate_target(cls, value: str) -> str:
+        if value not in SUPPORTED_TARGET_LANGS:
+            raise ValueError("unsupported target language")
         return value
 
 
@@ -114,6 +134,14 @@ async def translate_endpoint(req: TranslateRequest) -> dict[str, str]:
 async def lookup_endpoint(req: LookupRequest) -> dict:
     try:
         return lookup_dictionary(req.word, req.source_lang)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/quick-convert")
+async def quick_convert_endpoint(req: QuickConvertRequest) -> dict:
+    try:
+        return quick_convert(req.text, req.source, req.target)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

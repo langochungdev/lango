@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import quote
 
 import requests
 
@@ -121,6 +122,63 @@ def fallback_translate_api(text: str, source: str, target: str) -> TranslationRe
     payload = response.json()
     translated = ((payload.get("responseData") or {}).get("translatedText")) or text
     return TranslationResult(translated, "mymemory", "api-fallback")
+
+
+def is_single_word_text(text: str) -> bool:
+    cleaned = " ".join(text.split()).strip()
+    if not cleaned:
+        return False
+    return len(cleaned.split(" ")) == 1
+
+
+def _collect_datamuse_words(query: str, limit: int) -> list[str]:
+    response = SESSION.get(
+        f"https://api.datamuse.com/words?{query}",
+        timeout=HTTP_TIMEOUT,
+    )
+    if not response.ok:
+        return []
+    payload = response.json()
+    if not isinstance(payload, list):
+        return []
+    words: list[str] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        word = item.get("word")
+        if isinstance(word, str):
+            normalized = word.strip()
+            if normalized and normalized not in words:
+                words.append(normalized)
+        if len(words) >= limit:
+            break
+    return words
+
+
+def query_datamuse_word(word: str) -> dict[str, list[str]]:
+    cleaned = " ".join(word.split()).strip()
+    if not cleaned:
+        return {"synonyms": [], "related": [], "sounds_like": []}
+
+    encoded = quote(cleaned)
+    try:
+        synonyms = _collect_datamuse_words(f"rel_syn={encoded}&max=8", 8)
+    except Exception:
+        synonyms = []
+    try:
+        related = _collect_datamuse_words(f"ml={encoded}&max=8", 8)
+    except Exception:
+        related = []
+    try:
+        sounds_like = _collect_datamuse_words(f"sl={encoded}&max=8", 8)
+    except Exception:
+        sounds_like = []
+
+    return {
+        "synonyms": synonyms,
+        "related": related,
+        "sounds_like": sounds_like,
+    }
 
 
 def translate(text: str, source: str, target: str) -> TranslationResult:

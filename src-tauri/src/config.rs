@@ -86,6 +86,9 @@ pub struct AppConfig {
     pub hotkey_translate_shortcut: String,
     pub enable_hotkey_translate: bool,
     pub hotkey_translate_ctrl_enter_send: bool,
+    pub quick_convert_hotkey: String,
+    pub enable_quick_convert_hotkey: bool,
+    pub quick_convert_popup_position: String,
     pub ocr_paragraph_display_mode: String,
 }
 
@@ -111,6 +114,9 @@ impl Default for AppConfig {
             hotkey_translate_shortcut: "Shift".to_owned(),
             enable_hotkey_translate: true,
             hotkey_translate_ctrl_enter_send: false,
+            quick_convert_hotkey: "Ctrl+Space".to_owned(),
+            enable_quick_convert_hotkey: true,
+            quick_convert_popup_position: "middle-center".to_owned(),
             ocr_paragraph_display_mode: "popover".to_owned(),
         }
     }
@@ -166,6 +172,29 @@ impl AppConfig {
         }
         next.hotkey_translate_shortcut =
             sanitize_shortcut(&next.hotkey_translate_shortcut, "Shift", true);
+        next.quick_convert_hotkey =
+            sanitize_shortcut(&next.quick_convert_hotkey, "Ctrl+Space", false);
+        if next.quick_convert_popup_position == "left-middle" {
+            next.quick_convert_popup_position = "middle-left".to_owned();
+        } else if next.quick_convert_popup_position == "right-middle" {
+            next.quick_convert_popup_position = "middle-right".to_owned();
+        } else if next.quick_convert_popup_position == "center" {
+            next.quick_convert_popup_position = "middle-center".to_owned();
+        }
+        if !matches!(
+            next.quick_convert_popup_position.as_str(),
+            "top-left"
+                | "top-center"
+                | "top-right"
+                | "middle-left"
+                | "middle-center"
+                | "middle-right"
+                | "bottom-left"
+                | "bottom-center"
+                | "bottom-right"
+        ) {
+            next.quick_convert_popup_position = "middle-center".to_owned();
+        }
         if !matches!(
             next.ocr_paragraph_display_mode.as_str(),
             "image" | "popover"

@@ -105,7 +105,7 @@ export function SettingsPanel({ open, settings, onChange }: SettingsPanelProps) 
   const copy = getSettingsCopy(settings.target_language)
 
   const handleShortcutCapture =
-    (field: 'ocr_hotkey' | 'hotkey_translate_shortcut') =>
+    (field: 'ocr_hotkey' | 'hotkey_translate_shortcut' | 'quick_convert_hotkey') =>
     (event: KeyboardEvent<HTMLInputElement>) => {
       if (event.key === 'Tab') {
         return
@@ -125,7 +125,9 @@ export function SettingsPanel({ open, settings, onChange }: SettingsPanelProps) 
           const nextShortcut =
             field === 'hotkey_translate_shortcut'
               ? 'Shift'
-              : 'Alt+A'
+              : field === 'ocr_hotkey'
+                ? 'Alt+A'
+                : 'Ctrl+Space'
           onChange(setField(settings, field, nextShortcut))
         }
         return
@@ -220,26 +222,27 @@ export function SettingsPanel({ open, settings, onChange }: SettingsPanelProps) 
               </label>
 
               <div className="apl-settings-sep">
-                <div className="apl-settings-sep-label">OCR Capture</div>
                 <div className="apl-settings-ocr-inline">
-                  <label className="apl-settings-hotkey-merged">
-                    <input
-                      type="checkbox"
-                      checked={settings.enable_ocr}
-                      onChange={(event) => onChange(setField(settings, 'enable_ocr', event.target.checked))}
-                      aria-label={copy.enableOcr}
-                    />
-                    <span className="apl-settings-hk-label">{copy.ocrShortcut}</span>
-                    <input
-                      type="text"
-                      value={settings.ocr_hotkey}
-                      size={shortcutInputSize(settings.ocr_hotkey)}
-                      placeholder={copy.shortcutPlaceholder}
-                      readOnly
-                      disabled={!settings.enable_ocr}
-                      onKeyDown={handleShortcutCapture('ocr_hotkey')}
-                    />
-                  </label>
+                  <div className="apl-settings-hotkey-block">
+                    <span className="apl-settings-hotkey-block-title">{copy.ocrShortcut}</span>
+                    <label className="apl-settings-hotkey-merged apl-settings-hotkey-merged--compact">
+                      <input
+                        type="checkbox"
+                        checked={settings.enable_ocr}
+                        onChange={(event) => onChange(setField(settings, 'enable_ocr', event.target.checked))}
+                        aria-label={copy.enableOcr}
+                      />
+                      <input
+                        type="text"
+                        value={settings.ocr_hotkey}
+                        size={shortcutInputSize(settings.ocr_hotkey)}
+                        placeholder={copy.shortcutPlaceholder}
+                        readOnly
+                        disabled={!settings.enable_ocr}
+                        onKeyDown={handleShortcutCapture('ocr_hotkey')}
+                      />
+                    </label>
+                  </div>
                   <div
                     className="apl-settings-radio-col apl-settings-radio-col--ocr-inline"
                     role="group"
@@ -332,24 +335,74 @@ export function SettingsPanel({ open, settings, onChange }: SettingsPanelProps) 
               </label>
 
               <div className="apl-settings-sep">
-                <div className="apl-settings-sep-label">{copy.quickTranslateShortcut}</div>
-                <label className="apl-settings-hotkey-merged">
-                  <input
-                    type="checkbox"
-                    checked={settings.enable_hotkey_translate}
-                    onChange={(event) => onChange(setField(settings, 'enable_hotkey_translate', event.target.checked))}
-                    aria-label={copy.enableQuickTranslateHotkey}
-                  />
-                  <span className="apl-settings-hk-label">{copy.enableQuickTranslateHotkey}</span>
-                  <input
-                    type="text"
-                    value={settings.hotkey_translate_shortcut}
-                    size={shortcutInputSize(settings.hotkey_translate_shortcut)}
-                    placeholder={copy.shortcutPlaceholder}
-                    readOnly
-                    onKeyDown={handleShortcutCapture('hotkey_translate_shortcut')}
-                  />
-                </label>
+                <div className="apl-settings-hotkey-row">
+                  <div className="apl-settings-hotkey-block">
+                    <span className="apl-settings-hotkey-block-title">{copy.enableQuickTranslateHotkey}</span>
+                    <label className="apl-settings-hotkey-merged apl-settings-hotkey-merged--compact">
+                      <input
+                        type="checkbox"
+                        checked={settings.enable_hotkey_translate}
+                        onChange={(event) => onChange(setField(settings, 'enable_hotkey_translate', event.target.checked))}
+                        aria-label={copy.enableQuickTranslateHotkey}
+                      />
+                      <input
+                        type="text"
+                        value={settings.hotkey_translate_shortcut}
+                        size={shortcutInputSize(settings.hotkey_translate_shortcut)}
+                        placeholder={copy.shortcutPlaceholder}
+                        readOnly
+                        disabled={!settings.enable_hotkey_translate}
+                        onKeyDown={handleShortcutCapture('hotkey_translate_shortcut')}
+                      />
+                    </label>
+                  </div>
+
+                  <div className="apl-settings-hotkey-block">
+                    <span className="apl-settings-hotkey-block-title">{copy.quickConvertPopupHotkey}</span>
+                    <div className="apl-settings-hotkey-merged apl-settings-hotkey-merged--with-select">
+                      <input
+                        type="checkbox"
+                        checked={settings.enable_quick_convert_hotkey}
+                        onChange={(event) => onChange(setField(settings, 'enable_quick_convert_hotkey', event.target.checked))}
+                        aria-label={copy.enableQuickConvertPopupHotkey}
+                      />
+                      <input
+                        type="text"
+                        value={settings.quick_convert_hotkey}
+                        size={shortcutInputSize(settings.quick_convert_hotkey)}
+                        placeholder={copy.shortcutPlaceholder}
+                        readOnly
+                        disabled={!settings.enable_quick_convert_hotkey}
+                        onKeyDown={handleShortcutCapture('quick_convert_hotkey')}
+                      />
+
+                      <select
+                        className="apl-settings-hotkey-merged-select"
+                        aria-label={copy.quickConvertPopupPosition}
+                        value={settings.quick_convert_popup_position}
+                        onChange={(event) =>
+                          onChange(
+                            setField(
+                              settings,
+                              'quick_convert_popup_position',
+                              event.target.value as AppSettings['quick_convert_popup_position'],
+                            ),
+                          )
+                        }
+                      >
+                        <option value="top-left">{copy.quickConvertPositionTopLeft}</option>
+                        <option value="top-center">{copy.quickConvertPositionTopCenter}</option>
+                        <option value="top-right">{copy.quickConvertPositionTopRight}</option>
+                        <option value="middle-left">{copy.quickConvertPositionMiddleLeft}</option>
+                        <option value="middle-center">{copy.quickConvertPositionMiddleCenter}</option>
+                        <option value="middle-right">{copy.quickConvertPositionMiddleRight}</option>
+                        <option value="bottom-left">{copy.quickConvertPositionBottomLeft}</option>
+                        <option value="bottom-center">{copy.quickConvertPositionBottomCenter}</option>
+                        <option value="bottom-right">{copy.quickConvertPositionBottomRight}</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </article>

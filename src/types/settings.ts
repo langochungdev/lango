@@ -8,6 +8,16 @@ export type PopoverTriggerMode = "auto" | "shortcut";
 export type PopoverOpenPanelMode = "none" | "details" | "images";
 export type PopoverDefinitionLanguageMode = "output" | "input" | "english";
 export type OcrParagraphDisplayMode = "image" | "popover";
+export type QuickConvertPopupPosition =
+  | "top-left"
+  | "top-center"
+  | "top-right"
+  | "middle-left"
+  | "middle-center"
+  | "middle-right"
+  | "bottom-left"
+  | "bottom-center"
+  | "bottom-right";
 
 export interface AppSettings {
   enable_lookup: boolean;
@@ -29,6 +39,9 @@ export interface AppSettings {
   hotkey_translate_shortcut: string;
   enable_hotkey_translate: boolean;
   hotkey_translate_ctrl_enter_send: boolean;
+  quick_convert_hotkey: string;
+  enable_quick_convert_hotkey: boolean;
+  quick_convert_popup_position: QuickConvertPopupPosition;
   ocr_paragraph_display_mode: OcrParagraphDisplayMode;
 }
 
@@ -125,6 +138,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   hotkey_translate_shortcut: "Shift",
   enable_hotkey_translate: true,
   hotkey_translate_ctrl_enter_send: false,
+  quick_convert_hotkey: "Ctrl+Space",
+  enable_quick_convert_hotkey: true,
+  quick_convert_popup_position: "middle-center",
   ocr_paragraph_display_mode: "popover",
 };
 
@@ -182,6 +198,11 @@ export function sanitizeSettings(partial: Partial<AppSettings>): AppSettings {
     DEFAULT_SETTINGS.hotkey_translate_shortcut,
     true,
   );
+  const quickConvertHotkey = sanitizeShortcut(
+    merged.quick_convert_hotkey,
+    DEFAULT_SETTINGS.quick_convert_hotkey,
+    false,
+  );
   const audioMode =
     merged.auto_play_audio_mode === "word" ||
     merged.auto_play_audio_mode === "all" ||
@@ -210,6 +231,29 @@ export function sanitizeSettings(partial: Partial<AppSettings>): AppSettings {
     merged.ocr_paragraph_display_mode === "image"
       ? merged.ocr_paragraph_display_mode
       : DEFAULT_SETTINGS.ocr_paragraph_display_mode;
+  const popupPositionInput = String(
+    partial.quick_convert_popup_position ?? merged.quick_convert_popup_position,
+  );
+  const quickConvertPopupPositionRaw =
+    popupPositionInput === "left-middle"
+      ? "middle-left"
+      : popupPositionInput === "right-middle"
+        ? "middle-right"
+        : popupPositionInput === "center"
+          ? "middle-center"
+          : popupPositionInput;
+  const quickConvertPopupPosition =
+    quickConvertPopupPositionRaw === "top-left" ||
+    quickConvertPopupPositionRaw === "top-center" ||
+    quickConvertPopupPositionRaw === "top-right" ||
+    quickConvertPopupPositionRaw === "middle-left" ||
+    quickConvertPopupPositionRaw === "middle-center" ||
+    quickConvertPopupPositionRaw === "middle-right" ||
+    quickConvertPopupPositionRaw === "bottom-left" ||
+    quickConvertPopupPositionRaw === "bottom-center" ||
+    quickConvertPopupPositionRaw === "bottom-right"
+      ? quickConvertPopupPositionRaw
+      : DEFAULT_SETTINGS.quick_convert_popup_position;
   const sourceLanguage =
     typeof merged.source_language === "string" &&
     isInputLanguageCode(merged.source_language)
@@ -253,6 +297,9 @@ export function sanitizeSettings(partial: Partial<AppSettings>): AppSettings {
     enable_hotkey_translate: merged.enable_hotkey_translate !== false,
     hotkey_translate_ctrl_enter_send:
       merged.hotkey_translate_ctrl_enter_send === true,
+    quick_convert_hotkey: quickConvertHotkey,
+    enable_quick_convert_hotkey: merged.enable_quick_convert_hotkey !== false,
+    quick_convert_popup_position: quickConvertPopupPosition,
     ocr_paragraph_display_mode: ocrParagraphDisplayMode,
   };
 }

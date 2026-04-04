@@ -6,10 +6,12 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Popover } from '@/components/Popover/Popover'
 import { DebugLogWindow } from '@/components/DebugLog/DebugLogWindow'
 import { OcrOverlayWindow } from '@/components/OcrOverlay/OcrOverlayWindow'
+import { QuickConvertPopup } from '@/components/QuickConvert/QuickConvertPopup'
 import { SettingsPanel } from '@/components/Settings/SettingsPanel'
 import { getSettingsCopy } from '@/constants/settingsI18n'
 import { usePopover, type PopoverState, type PopoverTrigger } from '@/hooks/usePopover'
 import { loadSettings, saveSettings } from '@/services/config'
+import { quickConvertText, type QuickConvertResult } from '@/services/quickConvert'
 import {
   appendDebugLog,
   clearDebugLogs,
@@ -44,6 +46,11 @@ interface HotkeyTracePayload {
   detail?: string
 }
 
+interface QuickConvertOpenedPayload {
+  text: string
+  shortcut: string
+}
+
 interface UpdateAvailablePayload {
   current_version: string
   latest_version: string
@@ -70,8 +77,9 @@ const IS_POPOVER_WINDOW = WINDOW_MODE === 'popover'
 const IS_HOTKEY_INDICATOR_WINDOW = WINDOW_MODE === 'hotkey-indicator'
 const IS_OCR_OVERLAY_WINDOW = WINDOW_MODE === 'ocr-overlay'
 const IS_DEBUG_LOG_WINDOW = WINDOW_MODE === 'debug-log'
+const IS_QUICK_CONVERT_WINDOW = WINDOW_MODE === 'quick-convert'
 const IS_PREVIEW_WINDOW = WINDOW_MODE === 'preview' || PREVIEW_MODE
-const IS_SETTINGS_WINDOW = !IS_POPOVER_WINDOW && !IS_HOTKEY_INDICATOR_WINDOW && !IS_OCR_OVERLAY_WINDOW && !IS_DEBUG_LOG_WINDOW && !IS_PREVIEW_WINDOW
+const IS_SETTINGS_WINDOW = !IS_POPOVER_WINDOW && !IS_HOTKEY_INDICATOR_WINDOW && !IS_OCR_OVERLAY_WINDOW && !IS_DEBUG_LOG_WINDOW && !IS_QUICK_CONVERT_WINDOW && !IS_PREVIEW_WINDOW
 const DEBUG_TRACE_ENABLED = isDebugTraceEnabled()
 const DEFAULT_RELEASES_PAGE = 'https://dictover.langochung.me/releases'
 let updateCheckBootstrapped = false
@@ -913,7 +921,7 @@ function PopoverWindow() {
     if (state === 'idle') {
       appendDebugLog('popover', 'Popover idle')
     }
-  }, [data.dictionary, data.selectedText, data.translation, error, state])
+  }, [data.dictionary, data.ocrImageOverlay, data.selectedText, data.translation, error, state])
 
   useEffect(() => {
     if (state === 'loading') {
@@ -1131,6 +1139,381 @@ function HotkeyIndicatorWindow() {
   )
 }
 
+function QuickConvertWindow() {
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
+  const [inputValue, setInputValue] = useState('')
+  const [outputValue, setOutputValue] = useState('')
+  const [result, setResult] = useState<QuickConvertResult | null>(null)
+  const [focusToken, setFocusToken] = useState(0)
+  const [loading, setLoading] = useState(false)
+  const settingsRef = useRef<AppSettings>(DEFAULT_SETTINGS)
+  const saveSequenceRef = useRef(0)
+  const lastHotkeyEventRef = useRef({ copyAt: 0, clearAt: 0 })
+  const copy = getSettingsCopy(settings.target_language)
+  const hasTauriBridge = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+
+  const exportTraceLogs = useCallback((source: 'local-f8' | 'global-f8') => {
+    const now = Date.now()
+    if (now - lastHotkeyEventRef.current.copyAt < 900) {
+      return
+    }
+    lastHotkeyEventRef.current.copyAt = now
+    appendDebugLog(
+      'trace',
+      'F8 trace export requested',
+      `${source} | quick-convert | loading=${loading ? 1 : 0} | inputLen=${inputValue.trim().length} | outputLen=${outputValue.trim().length}`,
+    )
+    void (async () => {
+      const copied = await copyDebugLogsToClipboard()
+      appendDebugLog(
+        'trace',
+        copied ? 'F8 trace export copied' : 'F8 trace export failed',
+        source,
+      )
+    })()
+  }, [inputValue, loading, outputValue])
+
+  const clearTraceLogs = useCallback((source: 'local-f7' | 'global-f7') => {
+    const now = Date.now()
+    if (now - lastHotkeyEventRef.current.clearAt < 250) {
+      return
+    }
+    lastHotkeyEventRef.current.clearAt = now
+    clearDebugLogs()
+    if (source === 'local-f7') {
+      appendDebugLog('trace', 'F7 trace logs cleared', source)
+    }
+  }, [])
+
+  useEffect(() => {
+    settingsRef.current = settings
+  }, [settings])
+
+  useEffect(() => {
+    let mounted = true
+    const setup = async () => {
+      try {
+        const current = await loadSettings()
+        if (mounted) {
+          setSettings(current)
+        }
+      } catch {
+        if (mounted) {
+          setSettings(DEFAULT_SETTINGS)
+        }
+      }
+    }
+    void setup()
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  const persistSettings = useCallback((next: AppSettings) => {
+    setSettings(next)
+    settingsRef.current = next
+    void emit('settings-updated', next).catch(() => undefined)
+
+    const saveId = saveSequenceRef.current + 1
+    saveSequenceRef.current = saveId
+    void (async () => {
+      try {
+        const saved = await saveSettings(next)
+        if (saveId !== saveSequenceRef.current) {
+          return
+        }
+        settingsRef.current = saved
+        setSettings(saved)
+      } catch {
+        return
+      }
+    })()
+  }, [])
+
+  const closeQuickConvert = useCallback((reason: string) => {
+    appendDebugLog('quick-convert', 'Close quick convert', reason)
+    void invoke('hide_quick_convert_window').catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
+    let cleanupDebugCopy: (() => void) | null = null
+    let cleanupDebugClear: (() => void) | null = null
+
+    const setupDebugHotkeys = async () => {
+      try {
+        const unlistenDebugCopy = await listen('debug-copy-hotkey', () => {
+          exportTraceLogs('global-f8')
+        })
+        cleanupDebugCopy = unlistenDebugCopy
+      } catch {
+        cleanupDebugCopy = null
+      }
+
+      try {
+        const unlistenDebugClear = await listen('debug-clear-hotkey', () => {
+          clearTraceLogs('global-f7')
+        })
+        cleanupDebugClear = unlistenDebugClear
+      } catch {
+        cleanupDebugClear = null
+      }
+    }
+
+    if (DEBUG_TRACE_ENABLED) {
+      void setupDebugHotkeys()
+    }
+
+    const onDebugHotkeys = (event: KeyboardEvent) => {
+      if (!DEBUG_TRACE_ENABLED) {
+        return
+      }
+
+      if (event.key === 'F7') {
+        event.preventDefault()
+        event.stopPropagation()
+        clearTraceLogs('local-f7')
+        return
+      }
+
+      if (event.key === 'F8') {
+        event.preventDefault()
+        event.stopPropagation()
+        exportTraceLogs('local-f8')
+      }
+    }
+
+    window.addEventListener('keydown', onDebugHotkeys)
+
+    return () => {
+      window.removeEventListener('keydown', onDebugHotkeys)
+      cleanupDebugCopy?.()
+      cleanupDebugClear?.()
+    }
+  }, [clearTraceLogs, exportTraceLogs])
+
+  useEffect(() => {
+    let cleanupSettingsUpdated: (() => void) | null = null
+    let cleanupQuickConvertOpened: (() => void) | null = null
+
+    const setup = async () => {
+      try {
+        const unlistenSettingsUpdated = await listen<SettingsUpdatedPayload>('settings-updated', (event) => {
+          setSettings((previous) => sanitizeSettings({ ...previous, ...event.payload }))
+        })
+        cleanupSettingsUpdated = unlistenSettingsUpdated
+      } catch {
+        cleanupSettingsUpdated = null
+      }
+
+      try {
+        const unlistenQuickConvertOpened = await listen<QuickConvertOpenedPayload>('quick-convert-opened', (event) => {
+          const seedText = event.payload.text ?? ''
+          const hasSeed = seedText.trim().length > 0
+          if (seedText.trim().length > 0) {
+            setInputValue(seedText)
+          }
+          setOutputValue('')
+          setResult(null)
+          setFocusToken((current) => current + 1)
+          appendDebugLog(
+            'quick-convert',
+            'Quick convert opened',
+            `shortcut=${event.payload.shortcut || 'unknown'} seedLen=${seedText.trim().length} hasSeed=${hasSeed ? 1 : 0} preserveInput=${hasSeed ? 0 : 1}`,
+          )
+          appendDebugLog(
+            'quick-convert',
+            'Quick convert focus token requested',
+            `seedLen=${seedText.trim().length}`,
+          )
+        })
+        appendDebugLog('quick-convert', 'Quick convert opened listener ready')
+        cleanupQuickConvertOpened = unlistenQuickConvertOpened
+      } catch (error) {
+        appendDebugLog(
+          'quick-convert',
+          'Quick convert opened listener failed',
+          error instanceof Error ? error.message : String(error),
+        )
+        cleanupQuickConvertOpened = null
+      }
+    }
+
+    void setup()
+    return () => {
+      cleanupSettingsUpdated?.()
+      cleanupQuickConvertOpened?.()
+    }
+  }, [])
+
+  useEffect(() => {
+    const onKeydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeQuickConvert('escape')
+      }
+    }
+
+    const onWindowBlur = () => {
+      closeQuickConvert('window-blur')
+    }
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        closeQuickConvert('desktop-switch-hidden')
+      }
+    }
+
+    const onPageHide = () => {
+      closeQuickConvert('desktop-switch-pagehide')
+    }
+
+    let cleanupTauriFocus: (() => void) | null = null
+    if (hasTauriBridge) {
+      const setupTauriFocus = async () => {
+        try {
+          const unlisten = await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+            if (!focused) {
+              closeQuickConvert('tauri-window-blur')
+            }
+          })
+          cleanupTauriFocus = unlisten
+        } catch {
+          cleanupTauriFocus = null
+        }
+      }
+      void setupTauriFocus()
+    }
+
+    window.addEventListener('keydown', onKeydown)
+    window.addEventListener('blur', onWindowBlur)
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    window.addEventListener('pagehide', onPageHide)
+
+    return () => {
+      window.removeEventListener('keydown', onKeydown)
+      window.removeEventListener('blur', onWindowBlur)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      window.removeEventListener('pagehide', onPageHide)
+      cleanupTauriFocus?.()
+    }
+  }, [closeQuickConvert, hasTauriBridge])
+
+  const submitQuickConvert = useCallback(() => {
+    if (loading) {
+      return
+    }
+
+    const text = inputValue.trim()
+    if (!text) {
+      setOutputValue('')
+      setResult(null)
+      return
+    }
+
+    const source = settingsRef.current.quick_translate_source_language
+    const target = settingsRef.current.quick_translate_target_language
+    setLoading(true)
+    appendDebugLog(
+      'quick-convert',
+      'Submit quick convert',
+      `source=${source} target=${target} textLen=${text.length} bridge=${hasTauriBridge ? 1 : 0} pos=${settingsRef.current.quick_convert_popup_position}`,
+    )
+
+    void (async () => {
+      try {
+        const converted = await quickConvertText({ text, source, target })
+        setOutputValue(converted.result)
+        setResult(converted)
+        appendDebugLog(
+          'quick-convert',
+          'Quick convert success',
+          `kind=${converted.kind} engine=${converted.engine} mode=${converted.mode} resultLen=${converted.result.trim().length} meta=${converted.word_data ? 1 : 0}`,
+        )
+      } catch (cause) {
+        appendDebugLog(
+          'quick-convert',
+          'Quick convert primary failed, trying translate fallback',
+          `source=${source} target=${target} cause=${describeCause(cause)}`,
+        )
+        try {
+          const translated = await invoke<TranslateResult>('translate_text', {
+            payload: { text, source, target },
+          })
+          setOutputValue(translated.result)
+          setResult(null)
+          appendDebugLog(
+            'quick-convert',
+            'Quick convert fallback success',
+            `engine=${translated.engine} mode=${translated.mode} resultLen=${translated.result.trim().length}`,
+          )
+          return
+        } catch (fallbackCause) {
+          appendDebugLog(
+            'quick-convert',
+            'Quick convert fallback failed',
+            `source=${source} target=${target} error=${describeCause(fallbackCause)}`,
+          )
+        }
+        appendDebugLog(
+          'quick-convert',
+          'Quick convert failed',
+          `source=${source} target=${target} error=${describeCause(cause)} online=${typeof navigator !== 'undefined' && navigator.onLine ? 1 : 0}`,
+        )
+        console.error('[quick-convert] request failed', {
+          source,
+          target,
+          textLength: text.length,
+          error: cause instanceof Error ? cause.message : String(cause),
+        })
+      } finally {
+        setLoading(false)
+      }
+    })()
+  }, [hasTauriBridge, inputValue, loading])
+
+  const setQuickLanguages = useCallback((source: AppSettings['quick_translate_source_language'], target: AppSettings['quick_translate_target_language']) => {
+    const next = sanitizeSettings({
+      ...settingsRef.current,
+      quick_translate_source_language: source,
+      quick_translate_target_language: target,
+    })
+    persistSettings(next)
+  }, [persistSettings])
+
+  const onSwapLanguages = useCallback(() => {
+    const source = settingsRef.current.quick_translate_source_language
+    const target = settingsRef.current.quick_translate_target_language
+    const nextSource = target
+    const nextTarget = source === 'auto' ? 'en' : source
+    setQuickLanguages(nextSource, nextTarget)
+  }, [setQuickLanguages])
+
+  return (
+    <main className="apl-quick-convert-shell">
+      <QuickConvertPopup
+        open
+        focusToken={focusToken}
+        copy={copy}
+        positionMode={settings.quick_convert_popup_position}
+        sourceLanguage={settings.quick_translate_source_language}
+        targetLanguage={settings.quick_translate_target_language}
+        inputValue={inputValue}
+        outputValue={outputValue}
+        result={result}
+        onClose={closeQuickConvert}
+        onSubmit={submitQuickConvert}
+        onSwapLanguages={onSwapLanguages}
+        onSourceLanguageChange={(value) => setQuickLanguages(value, settingsRef.current.quick_translate_target_language)}
+        onTargetLanguageChange={(value) => setQuickLanguages(settingsRef.current.quick_translate_source_language, value)}
+        onInputValueChange={(value) => {
+          setInputValue(value)
+          setOutputValue('')
+          setResult(null)
+        }}
+      />
+    </main>
+  )
+}
+
 function PreviewWindow() {
   const [tab, setTab] = useState<PreviewTab>('settings')
   const [settings, setSettings] = useState<AppSettings>({
@@ -1314,6 +1697,7 @@ export function App() {
     document.body.classList.toggle('apl-popover-body', IS_POPOVER_WINDOW)
     document.body.classList.toggle('apl-hotkey-indicator-body', IS_HOTKEY_INDICATOR_WINDOW)
     document.body.classList.toggle('apl-ocr-overlay-body', IS_OCR_OVERLAY_WINDOW)
+    document.body.classList.toggle('apl-quick-convert-body', IS_QUICK_CONVERT_WINDOW)
     document.body.classList.toggle('apl-debug-body', IS_DEBUG_LOG_WINDOW)
     document.body.classList.toggle('apl-preview-body', IS_PREVIEW_WINDOW)
     return () => {
@@ -1321,6 +1705,7 @@ export function App() {
       document.body.classList.remove('apl-popover-body')
       document.body.classList.remove('apl-hotkey-indicator-body')
       document.body.classList.remove('apl-ocr-overlay-body')
+      document.body.classList.remove('apl-quick-convert-body')
       document.body.classList.remove('apl-debug-body')
       document.body.classList.remove('apl-preview-body')
     }
@@ -1332,6 +1717,10 @@ export function App() {
 
   if (IS_OCR_OVERLAY_WINDOW) {
     return <OcrOverlayWindow />
+  }
+
+  if (IS_QUICK_CONVERT_WINDOW) {
+    return <QuickConvertWindow />
   }
 
   if (IS_POPOVER_WINDOW) {

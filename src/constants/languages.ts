@@ -1,6 +1,6 @@
 export const INPUT_LANGUAGES = [
-  { code: "auto", label: "Auto Detect" },
   { code: "vi", label: "Vietnamese" },
+  { code: "auto", label: "Auto Detect" },
   { code: "en", label: "English" },
   { code: "zh-CN", label: "Chinese (Simplified)" },
   { code: "ja", label: "Japanese" },

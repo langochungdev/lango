@@ -3,6 +3,7 @@ use reqwest::Client;
 use screenshots::image;
 use semver::Version;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::borrow::Cow;
 use std::sync::Mutex;
 use tauri::{
@@ -46,6 +47,8 @@ struct VersionManifest {
 
 const VERSION_MANIFEST_URL: &str = "https://dictover.langochung.me/version.json";
 const DEFAULT_RELEASES_PAGE: &str = "https://dictover.langochung.me/releases";
+const QUICK_CONVERT_BASE_WIDTH: f64 = 520.0;
+const QUICK_CONVERT_BASE_HEIGHT: f64 = 360.0;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranslatePayload {
@@ -59,6 +62,40 @@ pub struct TranslateResponse {
     pub result: String,
     pub engine: String,
     pub mode: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuickConvertPayload {
+    pub text: String,
+    pub source: String,
+    pub target: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuickConvertWordData {
+    pub input: String,
+    #[serde(default)]
+    pub phonetic: Option<String>,
+    #[serde(default)]
+    pub audio_url: Option<String>,
+    #[serde(default)]
+    pub audio_lang: Option<String>,
+    #[serde(default)]
+    pub synonyms: Vec<String>,
+    #[serde(default)]
+    pub related: Vec<String>,
+    #[serde(default)]
+    pub sounds_like: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuickConvertResponse {
+    pub kind: String,
+    pub result: String,
+    pub engine: String,
+    pub mode: String,
+    pub fallback_used: bool,
+    pub word_data: Option<QuickConvertWordData>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -161,6 +198,12 @@ struct OcrOverlayBackgroundPayload {
     image_base64: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct QuickConvertOpenedPayload {
+    text: String,
+    shortcut: String,
+}
+
 const OCR_OVERLAY_WINDOW_LABEL: &str = "ocr-overlay";
 
 fn emit_hotkey_trace(app: &AppHandle, stage: &str, shortcut: &str, detail: String) {
@@ -194,6 +237,170 @@ pub async fn translate_via_sidecar(
         .json::<TranslateResponse>()
         .await
         .map_err(|err| format!("sidecar translate decode failed: {err}"))
+}
+
+pub async fn quick_convert_via_sidecar(
+    client: &Client,
+    payload: QuickConvertPayload,
+) -> Result<QuickConvertResponse, String> {
+    let endpoint = std::env::var("SIDECAR_QUICK_CONVERT_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:49152/quick-convert".to_owned());
+    let response = client
+        .post(endpoint)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|err| format!("sidecar quick-convert request failed: {err}"))?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        let text = payload.text.trim().to_owned();
+        let source = payload.source.clone();
+        let target = payload.target.clone();
+        let translate = translate_via_sidecar(
+            client,
+            TranslatePayload {
+                text: text.clone(),
+                source: source.clone(),
+                target,
+            },
+        )
+        .await
+        .map_err(|err| format!("sidecar quick-convert compat translate failed: {err}"))?;
+
+        let single_word = !text.is_empty()
+            && count_words(&text) == 1
+            && !contains_sentence_punctuation(&text)
+            && count_non_whitespace_chars(&text) <= 48;
+
+        let mut word_data: Option<QuickConvertWordData> = None;
+        if single_word {
+            let (synonyms, related, sounds_like) = query_datamuse_word_data(client, &text).await;
+            let lookup = lookup_via_sidecar(
+                client,
+                LookupPayload {
+                    word: text.clone(),
+                    source_lang: source,
+                },
+            )
+            .await
+            .ok();
+
+            let phonetic = lookup.as_ref().and_then(|item| item.phonetic.clone());
+            let audio_url = lookup.as_ref().and_then(|item| item.audio_url.clone());
+            let audio_lang = lookup.as_ref().and_then(|item| item.audio_lang.clone());
+            let has_extra = phonetic.is_some()
+                || audio_url.is_some()
+                || !synonyms.is_empty()
+                || !related.is_empty()
+                || !sounds_like.is_empty();
+
+            if has_extra {
+                word_data = Some(QuickConvertWordData {
+                    input: text,
+                    phonetic,
+                    audio_url,
+                    audio_lang,
+                    synonyms,
+                    related,
+                    sounds_like,
+                });
+            }
+        }
+
+        return Ok(QuickConvertResponse {
+            kind: if word_data.is_some() {
+                "word".to_owned()
+            } else {
+                "text".to_owned()
+            },
+            result: translate.result,
+            engine: translate.engine,
+            mode: if word_data.is_some() {
+                format!("{}+compat-word-enriched", translate.mode)
+            } else {
+                format!("{}+compat-translate", translate.mode)
+            },
+            fallback_used: true,
+            word_data,
+        });
+    }
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let snippet = response
+            .text()
+            .await
+            .unwrap_or_default()
+            .chars()
+            .take(240)
+            .collect::<String>();
+        return Err(format!(
+            "sidecar quick-convert http {}: {}",
+            status, snippet
+        ));
+    }
+
+    response
+        .json::<QuickConvertResponse>()
+        .await
+        .map_err(|err| format!("sidecar quick-convert decode failed: {err}"))
+}
+
+async fn query_datamuse_word_data(
+    client: &Client,
+    word: &str,
+) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let synonyms = collect_datamuse_words(client, "rel_syn", word, 8).await;
+    let related = collect_datamuse_words(client, "ml", word, 8).await;
+    let sounds_like = collect_datamuse_words(client, "sl", word, 8).await;
+    (synonyms, related, sounds_like)
+}
+
+async fn collect_datamuse_words(
+    client: &Client,
+    key: &str,
+    word: &str,
+    limit: usize,
+) -> Vec<String> {
+    let response = match client
+        .get("https://api.datamuse.com/words")
+        .query(&[(key, word), ("max", "8")])
+        .send()
+        .await
+    {
+        Ok(value) => value,
+        Err(_) => return Vec::new(),
+    };
+
+    if !response.status().is_success() {
+        return Vec::new();
+    }
+
+    let payload = match response.json::<Vec<Value>>().await {
+        Ok(value) => value,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut words: Vec<String> = Vec::new();
+    for item in payload {
+        let Some(word_value) = item.get("word").and_then(Value::as_str) else {
+            continue;
+        };
+        let normalized = word_value.trim();
+        if normalized.is_empty() {
+            continue;
+        }
+        if words
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(normalized))
+        {
+            continue;
+        }
+        words.push(normalized.to_owned());
+        if words.len() >= limit {
+            break;
+        }
+    }
+    words
 }
 
 async fn lookup_via_sidecar(
@@ -461,6 +668,110 @@ fn monitor_for_cursor(window: &tauri::WebviewWindow, cursor: (i32, i32)) -> Opti
     })
 }
 
+fn resolve_quick_convert_position(
+    app: &AppHandle,
+    window: &tauri::WebviewWindow,
+    position_mode: &str,
+) -> PhysicalPosition<i32> {
+    let Ok(window_size) = window.outer_size() else {
+        return PhysicalPosition::new(24, 24);
+    };
+
+    let width = i32::try_from(window_size.width).unwrap_or(QUICK_CONVERT_BASE_WIDTH as i32);
+    let height = i32::try_from(window_size.height).unwrap_or(QUICK_CONVERT_BASE_HEIGHT as i32);
+    let cursor = automation::cursor_position();
+    let monitor = cursor
+        .and_then(|point| monitor_for_cursor(window, point))
+        .or_else(|| window.current_monitor().ok().flatten())
+        .or_else(|| app.primary_monitor().ok().flatten());
+
+    let Some(monitor) = monitor else {
+        return PhysicalPosition::new(24, 24);
+    };
+
+    let horizontal_margin = 12;
+    let vertical_margin = 0;
+    let mon_pos = monitor.position();
+    let mon_size = monitor.size();
+    let mon_left = mon_pos.x;
+    let mon_top = mon_pos.y;
+    let mon_right = mon_left + i32::try_from(mon_size.width).unwrap_or(i32::MAX);
+    let mon_bottom = mon_top + i32::try_from(mon_size.height).unwrap_or(i32::MAX);
+
+    let min_x = mon_left + horizontal_margin;
+    let max_x = (mon_right - width - horizontal_margin).max(min_x);
+    let min_y = mon_top + vertical_margin;
+    let max_y = (mon_bottom - height - vertical_margin).max(min_y);
+
+    let center_x = mon_left + ((mon_right - mon_left - width) / 2);
+    let center_y = mon_top + ((mon_bottom - mon_top - height) / 2);
+
+    let normalized_mode = match position_mode {
+        "left-middle" => "middle-left",
+        "right-middle" => "middle-right",
+        "center" => "middle-center",
+        other => other,
+    };
+
+    let (preferred_x, preferred_y) = match normalized_mode {
+        "top-left" => (min_x, min_y),
+        "top-center" => (center_x, min_y),
+        "top-right" => (max_x, min_y),
+        "middle-left" => (min_x, center_y),
+        "middle-center" => (center_x, center_y),
+        "middle-right" => (max_x, center_y),
+        "bottom-left" => (min_x, max_y),
+        "bottom-center" => (center_x, max_y),
+        "bottom-right" => (max_x, max_y),
+        _ => (min_x, center_y),
+    };
+
+    PhysicalPosition::new(
+        preferred_x.clamp(min_x, max_x),
+        preferred_y.clamp(min_y, max_y),
+    )
+}
+
+pub fn show_quick_convert_window_with_seed(
+    app: &AppHandle,
+    position_mode: &str,
+    seed_text: Option<String>,
+    shortcut: Option<String>,
+) -> Result<(), String> {
+    let quick_convert = app
+        .get_webview_window("quick-convert")
+        .ok_or_else(|| "quick convert window not found".to_owned())?;
+
+    let _ = quick_convert.set_always_on_top(true);
+    quick_convert
+        .set_size(Size::Logical(LogicalSize::new(
+            QUICK_CONVERT_BASE_WIDTH,
+            QUICK_CONVERT_BASE_HEIGHT,
+        )))
+        .map_err(|err| format!("set quick convert size failed: {err}"))?;
+
+    let position = resolve_quick_convert_position(app, &quick_convert, position_mode);
+    quick_convert
+        .set_position(Position::Physical(position))
+        .map_err(|err| format!("set quick convert position failed: {err}"))?;
+
+    quick_convert
+        .show()
+        .map_err(|err| format!("show quick convert window failed: {err}"))?;
+    quick_convert
+        .set_focus()
+        .map_err(|err| format!("focus quick convert window failed: {err}"))?;
+
+    let payload = QuickConvertOpenedPayload {
+        text: seed_text.unwrap_or_default(),
+        shortcut: shortcut.unwrap_or_default(),
+    };
+    app.emit_to("quick-convert", "quick-convert-opened", payload)
+        .map_err(|err| format!("emit quick convert opened failed: {err}"))?;
+
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn load_config(state: State<'_, AppState>) -> Result<AppConfig, String> {
     let guard = state
@@ -468,6 +779,36 @@ pub async fn load_config(state: State<'_, AppState>) -> Result<AppConfig, String
         .lock()
         .map_err(|_| "config lock poisoned".to_owned())?;
     Ok(guard.clone())
+}
+
+#[tauri::command]
+pub async fn quick_convert_text(
+    state: State<'_, AppState>,
+    payload: QuickConvertPayload,
+) -> Result<QuickConvertResponse, String> {
+    quick_convert_via_sidecar(&state.client, payload).await
+}
+
+#[tauri::command]
+pub fn show_quick_convert_window(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let config = {
+        let guard = state
+            .config
+            .lock()
+            .map_err(|_| "config lock poisoned".to_owned())?;
+        guard.clone()
+    };
+    show_quick_convert_window_with_seed(&app, &config.quick_convert_popup_position, None, None)
+}
+
+#[tauri::command]
+pub fn hide_quick_convert_window(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("quick-convert") {
+        window
+            .hide()
+            .map_err(|err| format!("hide quick convert window failed: {err}"))?;
+    }
+    Ok(())
 }
 
 #[tauri::command]

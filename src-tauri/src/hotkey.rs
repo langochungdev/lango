@@ -14,6 +14,7 @@ use crate::selection;
 
 const DEFAULT_OCR_SHORTCUT: &str = "Alt+A";
 const DEFAULT_TRANSLATE_SHORTCUT: &str = "Shift";
+const DEFAULT_QUICK_CONVERT_SHORTCUT: &str = "Ctrl+Space";
 const HOTKEY_CAPTURE_SETTLE_MS: u64 = 90;
 const HOTKEY_RETRY_DELAY_MS: u64 = 120;
 const HOTKEY_LOADING_MIN_MS: u64 = 170;
@@ -100,6 +101,7 @@ fn set_last_translation(original: String, translated: String, source: String, ta
 pub enum HotkeyAction {
     CaptureOcr,
     TranslateReplace,
+    QuickConvertPopup,
 }
 
 fn normalize_shortcut(shortcut: &str) -> String {
@@ -310,6 +312,11 @@ pub fn register_hotkeys(app: &AppHandle, config: &AppConfig) -> Result<(), Strin
         DEFAULT_TRANSLATE_SHORTCUT,
         true,
     );
+    let quick_convert_shortcut = effective_shortcut(
+        &config.quick_convert_hotkey,
+        DEFAULT_QUICK_CONVERT_SHORTCUT,
+        false,
+    );
     let translate_is_ctrl_enter = is_ctrl_enter_shortcut(&translate_shortcut);
     let should_grab_ctrl_enter = config.enable_hotkey_translate
         && should_use_ctrl_enter_grab(config)
@@ -346,11 +353,26 @@ pub fn register_hotkeys(app: &AppHandle, config: &AppConfig) -> Result<(), Strin
         format!("skipped:duplicate:{translate_shortcut}")
     };
 
+    let quick_convert_state_text = if !config.enable_quick_convert_hotkey {
+        "disabled".to_owned()
+    } else if normalize_shortcut(&quick_convert_shortcut) == normalize_shortcut(&ocr_shortcut)
+        || normalize_shortcut(&quick_convert_shortcut) == normalize_shortcut(&translate_shortcut)
+    {
+        format!("skipped:duplicate:{quick_convert_shortcut}")
+    } else {
+        manager
+            .register(quick_convert_shortcut.as_str())
+            .map_err(|err| format!("register quick convert shortcut failed: {err}"))?;
+        format!("registered:{quick_convert_shortcut}")
+    };
+
     emit_hotkey_trace(
         app,
         "register",
         "system",
-        format!("ocr={ocr_state_text} | translate={translate_state_text}"),
+        format!(
+            "ocr={ocr_state_text} | translate={translate_state_text} | quickConvert={quick_convert_state_text}"
+        ),
     );
 
     Ok(())
@@ -368,12 +390,20 @@ fn resolve_shortcut_action(config: &AppConfig, shortcut: &str) -> Option<HotkeyA
         DEFAULT_TRANSLATE_SHORTCUT,
         true,
     ));
+    let quick_convert = normalize_shortcut(&effective_shortcut(
+        &config.quick_convert_hotkey,
+        DEFAULT_QUICK_CONVERT_SHORTCUT,
+        false,
+    ));
 
     if config.enable_ocr && incoming == ocr {
         return Some(HotkeyAction::CaptureOcr);
     }
     if config.enable_hotkey_translate && incoming == translate {
         return Some(HotkeyAction::TranslateReplace);
+    }
+    if config.enable_quick_convert_hotkey && incoming == quick_convert {
+        return Some(HotkeyAction::QuickConvertPopup);
     }
     None
 }
@@ -397,7 +427,7 @@ pub async fn handle_global_shortcut(app: AppHandle, shortcut: String) -> Result<
             "unmatched",
             &shortcut,
             format!(
-                "normalized={incoming} | ocr={} | translate={} | ocrEnabled={}",
+                "normalized={incoming} | ocr={} | translate={} | quickConvert={} | ocrEnabled={}",
                 normalize_shortcut(&effective_shortcut(
                     &config.ocr_hotkey,
                     DEFAULT_OCR_SHORTCUT,
@@ -408,6 +438,11 @@ pub async fn handle_global_shortcut(app: AppHandle, shortcut: String) -> Result<
                     DEFAULT_TRANSLATE_SHORTCUT,
                     true,
                 )),
+                normalize_shortcut(&effective_shortcut(
+                    &config.quick_convert_hotkey,
+                    DEFAULT_QUICK_CONVERT_SHORTCUT,
+                    false,
+                )),
                 config.enable_ocr,
             ),
         );
@@ -417,6 +452,7 @@ pub async fn handle_global_shortcut(app: AppHandle, shortcut: String) -> Result<
     let action_name = match action {
         HotkeyAction::CaptureOcr => "capture-ocr",
         HotkeyAction::TranslateReplace => "translate-replace",
+        HotkeyAction::QuickConvertPopup => "quick-convert-popup",
     };
     emit_hotkey_trace(
         &app,
@@ -429,6 +465,9 @@ pub async fn handle_global_shortcut(app: AppHandle, shortcut: String) -> Result<
         HotkeyAction::CaptureOcr => on_ocr_capture_triggered(app.clone()).await,
         HotkeyAction::TranslateReplace => {
             on_translate_replace_triggered(app.clone(), config, shortcut.clone()).await
+        }
+        HotkeyAction::QuickConvertPopup => {
+            on_quick_convert_triggered(app.clone(), config, shortcut.clone()).await
         }
     };
 
@@ -635,6 +674,37 @@ async fn on_ocr_capture_triggered(app: AppHandle) -> Result<(), String> {
         "selectedLen=0".to_owned(),
     );
     bridge::show_ocr_overlay(app)
+}
+
+async fn on_quick_convert_triggered(
+    app: AppHandle,
+    config: AppConfig,
+    shortcut: String,
+) -> Result<(), String> {
+    let selected = capture_selection_text_stable().await?;
+    let seed_text = selected.trim().to_owned();
+
+    emit_hotkey_trace(
+        &app,
+        "quick-convert-open",
+        &shortcut,
+        format!(
+            "position={} seedLen={}",
+            config.quick_convert_popup_position,
+            seed_text.chars().count()
+        ),
+    );
+
+    bridge::show_quick_convert_window_with_seed(
+        &app,
+        &config.quick_convert_popup_position,
+        if seed_text.is_empty() {
+            None
+        } else {
+            Some(seed_text)
+        },
+        Some(shortcut),
+    )
 }
 
 async fn on_translate_replace_triggered(

@@ -517,6 +517,7 @@ fn on_navigation_hotkey_event(app: &AppHandle, event_type: &rdev::EventType) {
 
     if should_hide_popover {
         let _ = force_close_popover(app, "navigation-hotkey");
+        let _ = force_close_quick_convert(app, "navigation-hotkey");
     }
 }
 
@@ -664,6 +665,16 @@ pub fn install_popover_window_guards(app: &AppHandle) {
         }
     });
 
+    if let Some(quick_convert) = app.get_webview_window("quick-convert") {
+        let app_handle = app.clone();
+        quick_convert.on_window_event(move |event| {
+            let should_hide = matches!(event, WindowEvent::Focused(false));
+            if should_hide {
+                let _ = force_close_quick_convert(&app_handle, "window-focused-false");
+            }
+        });
+    }
+
     #[cfg(target_os = "windows")]
     {
         install_windows_desktop_switch_guard(app);
@@ -690,6 +701,7 @@ unsafe extern "system" fn on_windows_desktop_switch(
                 "popover",
                 "hotkey-indicator",
                 "ocr-overlay",
+                "quick-convert",
                 "debug-log",
             ]
             .iter()
@@ -706,6 +718,7 @@ unsafe extern "system" fn on_windows_desktop_switch(
 
             if !is_our_window {
                 let _ = force_close_popover(app, "windows-desktop-switch-fg");
+                let _ = force_close_quick_convert(app, "windows-desktop-switch-fg");
             }
         }
     }
@@ -766,6 +779,11 @@ pub(crate) fn is_any_app_window_focused(app: &AppHandle) -> bool {
     }
     if let Some(debug) = app.get_webview_window("debug-log") {
         if debug.is_focused().unwrap_or(false) {
+            return true;
+        }
+    }
+    if let Some(quick_convert) = app.get_webview_window("quick-convert") {
+        if quick_convert.is_focused().unwrap_or(false) {
             return true;
         }
     }
@@ -1226,6 +1244,16 @@ fn force_close_popover(app: &AppHandle, reason: &str) -> Result<(), String> {
 
     let _ = app.emit("force-close-popover", reason.to_owned());
     hide_popover_window(app)
+}
+
+fn force_close_quick_convert(app: &AppHandle, reason: &str) -> Result<(), String> {
+    let _ = app.emit("force-close-quick-convert", reason.to_owned());
+    if let Some(window) = app.get_webview_window("quick-convert") {
+        window
+            .hide()
+            .map_err(|err| format!("hide quick convert window failed: {err}"))?;
+    }
+    Ok(())
 }
 
 pub fn emit_selection_changed(

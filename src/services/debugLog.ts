@@ -186,22 +186,44 @@ export async function copyDebugLogsToClipboard(): Promise<boolean> {
   }
 
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+      try {
+        await invoke("copy_text_to_clipboard", { text });
+        return true;
+      } catch (error) {
+        console.error("[trace] tauri clipboard copy failed", error);
+      }
+    }
+
     try {
       await navigator.clipboard.writeText(text);
       return true;
-    } catch {
-      /* empty */
+    } catch (error) {
+      console.error("[trace] navigator clipboard copy failed", error);
     }
   }
 
-  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
-    return false;
+  if (typeof document !== "undefined") {
+    try {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "true");
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      textarea.style.left = "-9999px";
+      textarea.style.top = "0";
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      const copied = document.execCommand("copy");
+      document.body.removeChild(textarea);
+      if (copied) {
+        return true;
+      }
+    } catch (error) {
+      console.error("[trace] execCommand clipboard copy failed", error);
+    }
   }
 
-  try {
-    await invoke("copy_text_to_clipboard", { text });
-    return true;
-  } catch {
-    return false;
-  }
+  return false;
 }
