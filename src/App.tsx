@@ -262,6 +262,7 @@ function SettingsWindow() {
   const lastAppliedUpdateKeyRef = useRef('')
   const settingsRef = useRef<AppSettings>(DEFAULT_SETTINGS)
   const saveSequenceRef = useRef(0)
+  const startupShowRequestedRef = useRef(false)
   const shellRef = useRef<HTMLElement | null>(null)
   const lastSyncedWindowHeightRef = useRef(0)
   const lastVerticalCenterOffsetRef = useRef(-1)
@@ -371,6 +372,28 @@ function SettingsWindow() {
     }
   }, [closeSettingsWindowWithReason, shouldCloseFromBackdropEvent])
 
+  const showSettingsWindowAfterUiReady = useCallback(() => {
+    if (!hasTauriBridge || startupShowRequestedRef.current) {
+      return
+    }
+
+    startupShowRequestedRef.current = true
+
+    const waitForUiPaint = () =>
+      new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => {
+            resolve()
+          })
+        })
+      })
+
+    void (async () => {
+      await waitForUiPaint()
+      void invoke('show_settings_window').catch(() => undefined)
+    })()
+  }, [hasTauriBridge])
+
   useEffect(() => {
     settingsRef.current = settings
   }, [settings])
@@ -383,6 +406,7 @@ function SettingsWindow() {
         if (mounted) {
           setSettings(current)
           setStatus('ready')
+          showSettingsWindowAfterUiReady()
           appendDebugLog(
             'settings',
             'Loaded settings',
@@ -393,6 +417,7 @@ function SettingsWindow() {
         if (mounted) {
           setSettings(DEFAULT_SETTINGS)
           setStatus('usingDefaults')
+          showSettingsWindowAfterUiReady()
           appendDebugLog('settings', 'Load settings failed, using defaults')
         }
       }
@@ -401,7 +426,7 @@ function SettingsWindow() {
     return () => {
       mounted = false
     }
-  }, [])
+  }, [showSettingsWindowAfterUiReady])
 
   useEffect(() => {
     let cleanupHotkey: (() => void) | null = null
