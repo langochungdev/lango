@@ -7,6 +7,8 @@ use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Position
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
 #[cfg(target_os = "windows")]
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LCONTROL, VK_RCONTROL};
+#[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{GetMessageW, MSG, WINEVENT_OUTOFCONTEXT};
 
 use crate::automation;
@@ -369,13 +371,34 @@ fn is_ctrl_enter_key(key: rdev::Key) -> bool {
     matches!(key, rdev::Key::Return | rdev::Key::KpReturn)
 }
 
+#[cfg(target_os = "windows")]
+fn is_ctrl_pressed_now() -> bool {
+    let left = unsafe { GetAsyncKeyState(VK_LCONTROL.0 as i32) };
+    let right = unsafe { GetAsyncKeyState(VK_RCONTROL.0 as i32) };
+    (left as u16 & 0x8000) != 0 || (right as u16 & 0x8000) != 0
+}
+
+#[cfg(not(target_os = "windows"))]
+fn is_ctrl_pressed_now() -> bool {
+    true
+}
+
 fn on_ctrl_enter_translate_event(app: &AppHandle, event_type: &rdev::EventType) -> bool {
     match event_type {
         rdev::EventType::KeyPress(key) if is_ctrl_enter_key(*key) => {
             let (ctrl_pressed, alt_pressed, meta_pressed, shift_pressed, plain_ctrl_enter) = {
-                let Ok(guard) = navigation_hotkey_state().lock() else {
+                let Ok(mut guard) = navigation_hotkey_state().lock() else {
                     return false;
                 };
+
+                let ctrl_now = is_ctrl_pressed_now();
+                if guard.ctrl_pressed != ctrl_now {
+                    guard.ctrl_pressed = ctrl_now;
+                    if !ctrl_now {
+                        CTRL_ENTER_INTERCEPT_ACTIVE.store(false, Ordering::SeqCst);
+                    }
+                }
+
                 let plain = guard.ctrl_pressed
                     && !guard.alt_pressed
                     && !guard.meta_pressed
