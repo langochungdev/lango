@@ -1,28 +1,18 @@
 {
-  "version": "0.3.0",
-  "tag": "v0.3.0",
-  "title": "DictOver v0.3.0",
-  "publishedAt": "2026-04-04",
+  "version": "0.4.0",
+  "tag": "v0.4.0",
+  "title": "DictOver v0.4.0",
+  "publishedAt": "2026-04-09",
   "notes": [
+    "fix: update video overlay formatting and adjust fetch path for version.json",
     "Refactor code structure for improved readability and maintainability",
-    "fix: ensure installation ping directory is created before sending ping",
-    "feat: add OpenCC support for Chinese script normalization and update requirements",
-    "Refactor code structure for improved readability and maintainability",
-    "Refactor code structure for improved readability and maintainability",
-    "feat: add uninstall ping functionality to track application removals",
-    "feat: implement version management and download link resolution in web interface",
-    "feat: update version to 0.1.0 and modify quick translate source language defaults",
-    "feat: update version to 0.2.0 in Cargo.toml and Cargo.lock",
-    "feat: implement OCR overlay background capture and update popover styles for compact translation",
-    "feat: implement Quick Convert feature with popup and settings",
-    "feat: enhance quick convert functionality with audio support and metadata",
-    "feat: enhance Quick Convert functionality with new position modes and metadata handling",
-    "feat: add warmup endpoint and related functionality for language translation",
-    "feat: enhance Quick Convert popup with horizontal positioning classes and styles",
-    "fix: stabilize settings tray toggle behavior"
+    "Add translation flow benchmarking script and results JSON",
+    "feat: add platform-specific control key detection for Windows",
+    "feat: implement sidecar request management and idle watchdog",
+    "refactor: simplify sidecar request handling and remove idle watchdog"
   ],
-  "notesMarkdown": "### Commits\n- Refactor code structure for improved readability and maintainability\n- fix: ensure installation ping directory is created before sending ping\n- feat: add OpenCC support for Chinese script normalization and update requirements\n- Refactor code structure for improved readability and maintainability\n- Refactor code structure for improved readability and maintainability\n- feat: add uninstall ping functionality to track application removals\n- feat: implement version management and download link resolution in web interface\n- feat: update version to 0.1.0 and modify quick translate source language defaults\n- feat: update version to 0.2.0 in Cargo.toml and Cargo.lock\n- feat: implement OCR overlay background capture and update popover styles for compact translation\n- feat: implement Quick Convert feature with popup and settings\n- feat: enhance quick convert functionality with audio support and metadata\n- feat: enhance Quick Convert functionality with new position modes and metadata handling\n- feat: add warmup endpoint and related functionality for language translation\n- feat: enhance Quick Convert popup with horizontal positioning classes and styles\n- fix: stabilize settings tray toggle behavior",
-  "downloadUrl": "https://github.com/langochungdev/dictover-desktop/releases/download/v0.3.0/DictOver-0.3.0.zip",
-  "releaseUrl": "https://github.com/langochungdev/dictover-desktop/releases/tag/v0.3.0",
-  "generatedAt": "2026-04-04T11:37:45.812Z"
+  "notesMarkdown": "### Commits\n- fix: update video overlay formatting and adjust fetch path for version.json\n- Refactor code structure for improved readability and maintainability\n- Add translation flow benchmarking script and results JSON\n- feat: add platform-specific control key detection for Windows\n- feat: implement sidecar request management and idle watchdog\n- refactor: simplify sidecar request handling and remove idle watchdog",
+  "downloadUrl": "https://github.com/langochungdev/dictover-desktop/releases/download/v0.4.0/DictOver-0.4.0.zip",
+  "releaseUrl": "https://github.com/langochungdev/dictover-desktop/releases/tag/v0.4.0",
+  "generatedAt": "2026-04-09T14:06:46.164Z"
 }

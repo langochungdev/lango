@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.4.0 - 2026-04-09
+
+### Commits
+- fix: update video overlay formatting and adjust fetch path for version.json
+- Refactor code structure for improved readability and maintainability
+- Add translation flow benchmarking script and results JSON
+- feat: add platform-specific control key detection for Windows
+- feat: implement sidecar request management and idle watchdog
+- refactor: simplify sidecar request handling and remove idle watchdog
+
 ## v0.3.0 - 2026-04-04
 
 ### Commits
